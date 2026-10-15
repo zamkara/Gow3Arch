@@ -22,7 +22,9 @@ jobs:
           persist-credentials: false
       - name: Check native packaging and installer regressions
         run: |
-          bash -n build.sh packaging/arch/PKGBUILD packaging/arch/gow3 packaging/arch/install.sh packaging/arch/ci-build.sh packaging/arch/smoke-test.sh
+          for script in build.sh packaging/arch/PKGBUILD packaging/arch/gow3 packaging/arch/*.sh; do
+            bash -n "$script"
+          done
           python3 -m unittest discover -s tests -p 'test_arch_packaging.py' -v
 
   build:

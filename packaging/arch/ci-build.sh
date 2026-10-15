@@ -9,6 +9,9 @@ useradd -m builder
 install -d -o builder -g builder /build
 mkdir -p /output
 cp /repo/packaging/arch/{PKGBUILD,gow3,gow3.desktop} /build/
+[[ $GOW3_COMMIT =~ ^[0-9a-f]{40}$ ]]
+# Published recipes and SRCINFO must reproduce the exact release source, without CI env.
+sed -i "s/^_commit=.*/_commit=$GOW3_COMMIT/" /build/PKGBUILD
 chown -R builder:builder /build
 # Git fetches only public source; credentials are never persisted in the container.
 runuser -u builder -- env GOW3_COMMIT="$GOW3_COMMIT" GOW3_BUILD_JOBS=2 \
