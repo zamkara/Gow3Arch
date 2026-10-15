@@ -29,9 +29,11 @@ Do not partially upgrade an Arch installation; keep your system repositories cur
 
 ## Run
 
-Open **God of War III Remastered** in your application menu or run `gow3`.
+Open **Launcher God of War III Remastered** in your application menu or run `gow3`.
 Choose your game dump, save your settings and press Play. `gow3 --play` uses saved
-settings; the desktop entry also offers a Play action. Steam shortcuts use the
+settings. The separate **God of War III Remastered** application entry runs
+`gow3 --play` and reads the same saved launcher configuration on every launch.
+The launcher entry also offers a Play action. Steam shortcuts use the
 native wrapper so the writable paths and private Python dependency are preserved.
 
 You need an x86_64 CPU with AVX, a Vulkan 1.3 capable GPU and its driver, and your

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=God of War III Remastered
+Comment=Play God of War III Remastered using saved launcher settings
+Exec=gow3 --play
+TryExec=gow3
+Icon=gow3
+Categories=Game;
+Terminal=false
+StartupWMClass=gow3
