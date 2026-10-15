@@ -4,7 +4,12 @@ set -euo pipefail
 pacman -Syu --noconfirm --needed xorg-server-xvfb xorg-xauth ttf-dejavu
 mapfile -t packages < <(printf '%s\n' /release/gow3-*-x86_64.pkg.tar.zst)
 [[ ${#packages[@]} == 1 && -f ${packages[0]} ]]
+# Official minimal Arch images omit documentation via NoExtract. Whitelist only
+# this package's documentation, including its parent directory, inside this container.
+# Later inverted patterns override earlier exclusions; retain hosts/resolv.conf exclusions.
+printf '\n[options]\nNoExtract = !usr/share/doc/ !usr/share/doc/gow3/ !usr/share/doc/gow3/*\n' >> /etc/pacman.conf
 pacman -U --noconfirm "${packages[0]}"
+[[ -s /usr/share/doc/gow3/README.md ]]
 for binary in /usr/lib/gow3/bin/gow3-probe /usr/lib/gow3/bin/gow3-gpu-capabilities /usr/lib/gow3/bin/gpu/libgow3gpu.so; do
     output=$(ldd "$binary")
     printf '%s\n' "$output"
