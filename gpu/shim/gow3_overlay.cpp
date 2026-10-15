@@ -294,6 +294,20 @@ std::string OverlayText() {
     namespace P = Gow3PerfStats;
     const auto& s = Gow3Settings::Get();
     const unsigned items = s.overlay_items;
+    static P::RefreshTimer refresh;
+    static std::string cached_text;
+    static unsigned previous_items = ~0u;
+    static int previous_layout = -1, previous_upscaler = -1, previous_interval = -1;
+    const int layout = s.overlay_layout, upscaler = s.upscaler, interval = s.overlay_interval_ms;
+    const bool changed = items != previous_items || layout != previous_layout ||
+                         upscaler != previous_upscaler || interval != previous_interval;
+    if (!refresh.Due(P::RefreshTimer::Clock::now(), interval, changed)) {
+        return cached_text;
+    }
+    previous_items = items;
+    previous_layout = layout;
+    previous_upscaler = upscaler;
+    previous_interval = interval;
     if ((items & (P::Gpu | P::Cpu | P::Ram | P::Vram)) && overlay_instance) {
         P::Start(*overlay_instance);
     }
@@ -301,7 +315,8 @@ std::string OverlayText() {
     sample.fps = frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f;
     sample.frame_ms = frame_ms_avg;
     sample.upscaler = UpscalerLabel(s.upscaler);
-    return P::Format(sample, items, s.overlay_layout == 0);
+    cached_text = P::Format(sample, items, layout == 0);
+    return cached_text;
 }
 
 constexpr const char* Unsupported = "Unavailable: game version or code signature mismatch.";
@@ -499,6 +514,10 @@ void OverlayTab() {
     }
     ImGui::SeparatorText("Appearance");
     if (BeginRows("##appearance")) {
+        static const char* const intervals[] = {"1 second", "2 seconds", "5 seconds", "10 seconds"};
+        static const int interval_values[] = {1000, 2000, 5000, 10000};
+        ChoiceRow("Update interval", s.overlay_interval_ms, intervals, interval_values, 4,
+                  "How often the displayed readings change; rendering stays at full speed.");
         SliderRow("Font size", s.overlay_scale, 50, 300, "%d%%", "Size of the overlay text.");
         static const char* const corners[] = {"Top left", "Top right", "Bottom left", "Bottom right"};
         ChoiceRow("Corner", s.overlay_corner, corners, nullptr, 4, "Where the overlay sits.");

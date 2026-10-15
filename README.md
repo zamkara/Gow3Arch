@@ -47,6 +47,11 @@ iced-x86 ABI3 module is installed privately under `/usr/lib/gow3/python` because
 it is not in the official Arch repositories. It never replaces system Python
 packages. Build tools are not needed to play. Vulkan drivers remain host-managed.
 
+The performance overlay defaults to a one-second refresh interval. Change
+**Graphics → Overlay update interval** in the launcher or **Overlay → Appearance →
+Update interval** in the in-game menu to 1, 2, 5 or 10 seconds. Both use the same
+`overlay_interval_ms` key in `gow3.ini`; this affects displayed readings, not FPS.
+
 ## User files and removal
 
 - Game settings, saves, prepared files, mods and caches: `${XDG_DATA_HOME:-~/.local/share}/gow3`.

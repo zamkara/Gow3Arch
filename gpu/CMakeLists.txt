@@ -423,3 +423,7 @@ target_link_libraries(fsr4-bench PRIVATE ffx-vulkan::fsr4-v07-vulkan ffx-vulkan:
 
 add_executable(cheat-hook-test ../tests/test_cheat_hook.cpp)
 target_compile_options(cheat-hook-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+
+add_executable(perf-refresh-test EXCLUDE_FROM_ALL ../tests/test_perf_refresh.cpp)
+target_include_directories(perf-refresh-test PRIVATE shim)
+target_compile_options(perf-refresh-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

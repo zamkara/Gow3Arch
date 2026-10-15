@@ -35,6 +35,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
             return;
         }
     }
+    if (key == "overlay_interval_ms") {
+        v.overlay_interval_ms = std::clamp(i, 1000, 10000);
+        return;
+    }
     if (key == "overlay_scale") {
         v.overlay_scale = std::clamp(i, 50, 300);
         return;
@@ -299,6 +303,7 @@ void Save() {
                  int(v.cheats[3].load()), int(v.cheats[4].load()),
                  int(v.cheats[5].load()), int(v.cheats[6].load()));
     std::fprintf(file, "enemy_health_bar=%d\n", int(v.enemy_health_bar.load()));
+    std::fprintf(file, "overlay_interval_ms=%d\n", v.overlay_interval_ms.load());
     std::fprintf(file,
                  "overlay_fps=%d\noverlay_frametime=%d\noverlay_upscaler=%d\noverlay_gpu=%d\n"
                  "overlay_cpu=%d\noverlay_ram=%d\noverlay_vram=%d\noverlay_scale=%d\noverlay_corner=%d\n"

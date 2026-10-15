@@ -296,7 +296,7 @@ INI_FLAGS = {'cheat_double_jumps', 'cheat_very_hard', 'object_motion', 'show_fps
              'stale_readback'}
 # The graphics keys are also in the in-game menu (Insert / R3+L2); run.py reads the startup ones.
 INI_DEFAULTS = {'upscaler': 'fsr3', 'preset': '1',
-                'object_motion': '1', 'show_fps': '1', 'output_res': '1920x1080',
+                'object_motion': '1', 'show_fps': '1', 'overlay_interval_ms': '1000', 'output_res': '1920x1080',
                 'live_resolution': 'auto', 'display_mode': 'windowed', 'vsync': '1', 'fps_limit': '0',
                 'async_shaders': '1', 'deferred_readback': '1', 'stale_readback': '1',
                 'render_resolution': 'native', 'engine_fps': '120',
@@ -1238,6 +1238,9 @@ class Launcher:
         self.section(f, _('Overlay'))
         self.check(f, 'show_fps', 'ini', _('Show performance overlay'),
                    _('Items, size and corner: in-game menu (Insert / R3+L2) > Overlay.'))
+        self.row(f, _('Overlay update interval'),
+                 self.choice(f, 'overlay_interval_ms', 'ini', [('1000', ('1 second',)), ('2000', ('2 seconds',)), ('5000', ('5 seconds',)), ('10000', ('10 seconds',))]),
+                 _('How often the overlay readings change. Rendering speed is unchanged.'))
         self.section(f, _('Screenshots'))
         shots = self.ttk.Button(f, text=_('Open the screenshots folder'),
                            command=lambda: self.open_path(

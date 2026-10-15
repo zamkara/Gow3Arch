@@ -52,15 +52,21 @@ int main() {
         std::ofstream out(path);
         out << "show_fps=1\noverlay_fps=0\noverlay_frametime=1\noverlay_upscaler=0\noverlay_gpu=1\n"
                "overlay_cpu=1\noverlay_ram=0\noverlay_vram=1\noverlay_scale=400\noverlay_corner=2\n"
-               "overlay_opacity=-5\noverlay_layout=1\nmenu_tab=3\n";
+               "overlay_opacity=-5\noverlay_layout=1\nmenu_tab=3\noverlay_interval_ms=2000\n";
     }
+#ifdef _WIN32
     _putenv_s("GOW3_CONFIG", path);
+#else
+    setenv("GOW3_CONFIG", path, 1);
+#endif
     auto& v = Gow3Settings::Get();
     assert(v.overlay_items == P::DefaultItems && v.overlay_scale == 100 && v.overlay_corner == 1);
     Gow3Settings::Load();
     assert(v.overlay_items == (P::FrameTime | P::Gpu | P::Cpu | P::Vram));
     assert(v.overlay_scale == 300 && v.overlay_corner == 2 && v.overlay_opacity == 0);
     assert(v.overlay_layout == 1 && v.menu_tab == 3);
+    assert(v.overlay_interval_ms == 2000);
+    v.overlay_interval_ms = 5000;
     v.overlay_items = P::Fps | P::Ram;
     v.overlay_scale = 150;
     v.overlay_opacity = 70;
@@ -69,15 +75,22 @@ int main() {
     const std::string saved = Read(path);
     for (const char* line : {"overlay_fps=1\n", "overlay_frametime=0\n", "overlay_ram=1\n", "overlay_vram=0\n",
                              "overlay_scale=150\n", "overlay_corner=2\n", "overlay_opacity=70\n",
-                             "overlay_layout=1\n", "menu_tab=1\n"}) {
+                             "overlay_layout=1\n", "menu_tab=1\n", "overlay_interval_ms=5000\n"}) {
         assert(saved.find(line) != std::string::npos);
     }
     {
         std::ofstream out(path);
-        out << "overlay_corner=9\nmenu_tab=-1\noverlay_scale=10\n";
+        out << "overlay_corner=9\nmenu_tab=-1\noverlay_scale=10\noverlay_interval_ms=0\n";
     }
     Gow3Settings::Load();
     assert(v.overlay_corner == 1 && v.menu_tab == 0 && v.overlay_scale == 50);
+    assert(v.overlay_interval_ms == 1000);
+    {
+        std::ofstream out(path);
+        out << "overlay_interval_ms=99999\n";
+    }
+    Gow3Settings::Load();
+    assert(v.overlay_interval_ms == 10000);
     std::remove(path);
     std::puts("PASS: performance overlay");
 }

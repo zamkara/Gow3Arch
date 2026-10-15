@@ -50,6 +50,10 @@ build() {
 check() {
     cd "$srcdir/gow3-source"
     out/gow3-probe --cpu-features
+    c++ -std=c++20 -Wall -Wextra -Werror -Igpu/shim tests/test_perf_refresh.cpp -o "$srcdir/perf-refresh-test"
+    "$srcdir/perf-refresh-test"
+    c++ -std=c++20 -Wall -Wextra -Werror -Igpu/shim tests/test_perf_overlay.cpp gpu/shim/gow3_settings.cpp -o "$srcdir/perf-overlay-test"
+    "$srcdir/perf-overlay-test"
     desktop-file-validate "$startdir/gow3.desktop" "$startdir/gow3-play.desktop"
     # Run Python regression tests on a virtual X display, without a game dump.
     xvfb-run -a python -m unittest discover -s tests -p 'test_*.py'

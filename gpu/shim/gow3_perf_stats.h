@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <chrono>
 #include <cstdio>
 #include <string>
 
@@ -15,6 +16,24 @@ class Instance;
 }
 
 namespace Gow3PerfStats {
+
+// Cache the displayed readings independently of the rendering cadence.
+class RefreshTimer {
+public:
+    using Clock = std::chrono::steady_clock;
+    bool Due(Clock::time_point now, int interval_ms, bool changed = false) {
+        const auto interval = std::chrono::milliseconds(std::clamp(interval_ms, 1000, 10000));
+        if (!initialized || changed || now - last >= interval) {
+            initialized = true;
+            last = now;
+            return true;
+        }
+        return false;
+    }
+private:
+    bool initialized = false;
+    Clock::time_point last{};
+};
 
 /// Overlay items (Gow3Settings::Values::overlay_items).
 enum Item : unsigned {
