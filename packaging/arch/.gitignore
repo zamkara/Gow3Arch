@@ -1,0 +1,6 @@
+/src/
+/pkg/
+/gow3-source/
+/*.pkg.tar.*
+/*.whl
+/vk_mem_alloc.h

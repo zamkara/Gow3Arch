@@ -18,7 +18,7 @@ options=('!lto' '!debug')
 _commit=${GOW3_COMMIT:-015ffd8c37c5c2e4f45ac2f514a368672195d7e1}
 [[ $_commit =~ ^[0-9a-f]{40}$ ]] || return 1
 _wheel=iced_x86-1.21.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-source=("gow3::git+https://github.com/zamkara/Gow3Arch.git#commit=$_commit"
+source=("gow3-source::git+https://github.com/zamkara/Gow3Arch.git#commit=$_commit"
         "https://files.pythonhosted.org/packages/5d/08/054cac5c4f435a243e423323783992c78c7c2f22cf2269fcca145b8423af/$_wheel"
         'vk_mem_alloc.h::https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/v3.1.0/include/vk_mem_alloc.h')
 sha256sums=('SKIP'
@@ -27,20 +27,20 @@ sha256sums=('SKIP'
 noextract=("$_wheel")
 
 pkgver() {
-    cd "$srcdir/gow3"
+    cd "$srcdir/gow3-source"
     local version
     version=$(sed -n "s/^VERSION = '\([^']*\)'/\1/p" launcher/gow3_launcher_win.py)
     printf '%s.r%s.g%s' "$version" "$(git rev-list --count HEAD)" "$(git rev-parse --short=12 HEAD)"
 }
 
 prepare() {
-    cd "$srcdir/gow3"
+    cd "$srcdir/gow3-source"
     git submodule update --init --recursive
     install -Dm644 "$srcdir/vk_mem_alloc.h" "$srcdir/headers/vk_mem_alloc.h"
 }
 
 build() {
-    cd "$srcdir/gow3"
+    cd "$srcdir/gow3-source"
     export GOW3_PGO=off GOW3_LTO=OFF
     export GOW3_BUILD_JOBS=${GOW3_BUILD_JOBS:-2}
     export CMAKE_INCLUDE_PATH="$srcdir/headers${CMAKE_INCLUDE_PATH:+:$CMAKE_INCLUDE_PATH}"
@@ -48,7 +48,7 @@ build() {
 }
 
 check() {
-    cd "$srcdir/gow3"
+    cd "$srcdir/gow3-source"
     out/gow3-probe --cpu-features
     desktop-file-validate "$startdir/gow3.desktop"
     # Run Python regression tests on a virtual X display, without a game dump.
@@ -56,7 +56,7 @@ check() {
 }
 
 package() {
-    cd "$srcdir/gow3"
+    cd "$srcdir/gow3-source"
     local dest="$pkgdir/usr/lib/gow3"
     install -Dm755 out/gow3-probe "$dest/bin/gow3-probe"
     install -Dm755 out/gow3-gpu-capabilities "$dest/bin/gow3-gpu-capabilities"
