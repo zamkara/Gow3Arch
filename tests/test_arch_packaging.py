@@ -109,7 +109,7 @@ class NativeIntegrationTests(unittest.TestCase):
         workflows = list((ROOT / '.github/workflows').glob('*.yml'))
         self.assertEqual([p.name for p in workflows], ['archlinux.yml'])
         workflow = workflows[0].read_text()
-        self.assertIn('needs: smoke', workflow)
+        self.assertIn('needs: [sync, smoke]', workflow)
         self.assertIn('sha256sum --check SHA256SUMS', workflow)
         self.assertNotIn('windows-2025', workflow)
 
@@ -121,3 +121,49 @@ class NativeIntegrationTests(unittest.TestCase):
     def test_native_wrapper_does_not_write_bytecode_to_system_directory(self):
         wrapper = (ROOT / 'packaging/arch/gow3').read_text()
         self.assertIn('export PYTHONDONTWRITEBYTECODE=1', wrapper)
+
+
+class UpstreamSyncTests(unittest.TestCase):
+    def test_code_updates_keep_fork_policy_and_remove_added_upstream_workflow(self):
+        self.exercise(conflict=False)
+
+    def test_conflicting_code_aborts_and_keeps_original_head(self):
+        self.exercise(conflict=True)
+
+    def exercise(self, conflict):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);upstream=root/'upstream';fork=root/'fork'
+            def git(where,*args,check=True):
+                return subprocess.run(['git','-C',str(where),*args],check=check,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+            upstream.mkdir();git(upstream,'init','-b','main')
+            git(upstream,'config','user.name','Test');git(upstream,'config','user.email','test@example.invalid')
+            for name,text in [('README.md','upstream original'),('README.es.md','original'),('README.pt-BR.md','original'),('.github/workflows/old.yml','old'),('packaging/base','original'),('docs/UPSTREAM.md','original'),('tests/test_arch_packaging.py','original'),('src/runtime.c','base')]:
+                path=upstream/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text+'\n')
+            git(upstream,'add','.');git(upstream,'commit','-m','base')
+            subprocess.run(['git','clone',str(upstream),str(fork)],check=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+            git(fork,'config','user.name','Test');git(fork,'config','user.email','test@example.invalid')
+            (fork/'README.md').write_text('native Arch fork\n')
+            (fork/'packaging/base').write_text('native package\n')
+            if conflict:(fork/'src/runtime.c').write_text('fork code\n')
+            git(fork,'add','.');git(fork,'commit','-m','fork policy')
+            before=git(fork,'rev-parse','HEAD').stdout.strip()
+            (upstream/'README.md').write_text('new AppImage instructions\n')
+            (upstream/'packaging/base').write_text('Windows package\n')
+            (upstream/'.github/workflows/windows.yml').write_text('new upstream runner\n')
+            (upstream/'src/runtime.c').write_text('fixed upstream code\n')
+            git(upstream,'add','.');git(upstream,'commit','-m','upstream fixes')
+            result=subprocess.run(['bash',str(ROOT/'packaging/arch/sync-upstream.sh'),str(upstream),'main'],cwd=fork,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+            self.assertEqual((fork/'README.md').read_text(),'native Arch fork\n')
+            self.assertEqual((fork/'packaging/base').read_text(),'native package\n')
+            self.assertFalse((fork/'.github/workflows/windows.yml').exists())
+            self.assertEqual(git(fork,'status','--porcelain').stdout,'')
+            if conflict:
+                self.assertNotEqual(result.returncode,0,result.stdout)
+                self.assertEqual(git(fork,'rev-parse','HEAD').stdout.strip(),before)
+                self.assertEqual((fork/'src/runtime.c').read_text(),'fork code\n')
+            else:
+                self.assertEqual(result.returncode,0,result.stdout)
+                self.assertEqual((fork/'src/runtime.c').read_text(),'fixed upstream code\n')
+                second=subprocess.run(['bash',str(ROOT/'packaging/arch/sync-upstream.sh'),str(upstream),'main'],cwd=fork,capture_output=True,text=True)
+                self.assertEqual(second.returncode,0,second.stdout+second.stderr)
+                self.assertIn('already synchronized',second.stdout)

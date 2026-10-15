@@ -78,8 +78,21 @@ container and opens the launcher as an unprivileged user on Xvfb. It checks shar
 libraries and clean package removal before publishing. Pushes to main and manual
 runs publish a complete release tagged with the source commit hash; pull requests
 only build and test. Failed builds do not publish a release. Only native Arch
-artifacts are produced. Upstream changes are merged and reviewed in this fork;
-there is no unattended upstream merge or claim of automatic daily synchronization.
+artifacts are produced. Every main-branch run fetches and merges upstream before building, including a daily
+run at 03:43 Asia/Jakarta. Upstream source history is retained through a three-way
+merge. The fork's `.github/`, `packaging/`, root READMEs, upstream documentation
+snapshot and packaging regression tests are restored from the fork after merging.
+Upstream Windows/AppImage workflows cannot replace or reappear beside the native
+workflow. Runtime, renderer, launcher, source submodules and game patches continue
+to receive upstream fixes while cleanly merged local source changes are preserved.
+
+A source conflict aborts the merge without pushing changes or publishing a release;
+it needs review. A successful merge is pushed back to this repository, and every
+subsequent build, test and release uses that exact resulting commit. GitHub's own
+workflow token prevents the synchronization push from triggering a recursive run.
+A source commit that already has a published native release skips the expensive
+build and release stages. Automatic synchronization reduces routine maintenance; it cannot guarantee that
+upstream changes will remain compatible with Arch or our local changes.
 
 See [upstream documentation](docs/UPSTREAM.md) for runtime behavior, controls,
 known limitations and development details. Its Windows/AppImage instructions refer
@@ -88,7 +101,8 @@ historical upstream documentation.
 
 ## Credits
 
-This project is a fork of Supermedo's Windows port, which builds on deadinside28's original:
+This fork builds on [Felipe Prado's gow3_pc](https://github.com/FelipePrado0/gow3_pc),
+which builds on Supermedo's Windows port and deadinside28's original:
 
 - **deadinside28**: [bloodborne_pc](https://github.com/deadinside28/bloodborne_pc), the original
   native port.
