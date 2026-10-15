@@ -63,6 +63,7 @@ jobs:
             bash -n "$script"
           done
           python3 -m unittest discover -s tests -p 'test_arch_packaging.py' -v
+          python3 -m unittest discover -s tests -p 'test_gpu_user_paths.py' -v
 
   build:
     needs: [sync, validate]
