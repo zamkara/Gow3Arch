@@ -11,7 +11,7 @@ for binary in /usr/lib/gow3/bin/gow3-probe /usr/lib/gow3/bin/gow3-gpu-capabiliti
     if grep -q 'not found' <<< "$output"; then exit 1; fi
 done
 # Private Python dependency is available without pip or PyInstaller.
-PYTHONPATH=/usr/lib/gow3/python python -c 'import iced_x86; from PIL import Image; import tkinter'
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/lib/gow3/python python -c 'import iced_x86; from PIL import Image; import tkinter'
 /usr/lib/gow3/bin/gow3-probe --cpu-features
 useradd -m player
 work=$(mktemp -d)

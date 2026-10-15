@@ -112,3 +112,12 @@ class NativeIntegrationTests(unittest.TestCase):
         self.assertIn('needs: smoke', workflow)
         self.assertIn('sha256sum --check SHA256SUMS', workflow)
         self.assertNotIn('windows-2025', workflow)
+
+    def test_source_cache_does_not_collide_with_launcher(self):
+        recipe = (ROOT / 'packaging/arch/PKGBUILD').read_text()
+        self.assertIn('gow3-source::git+', recipe)
+        self.assertNotIn('"gow3::git+', recipe)
+
+    def test_native_wrapper_does_not_write_bytecode_to_system_directory(self):
+        wrapper = (ROOT / 'packaging/arch/gow3').read_text()
+        self.assertIn('export PYTHONDONTWRITEBYTECODE=1', wrapper)
