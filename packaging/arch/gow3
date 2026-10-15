@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export GOW3_DATA_DIR=${GOW3_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/gow3}
+export GOW3_PREBUILT=1
+export GOW3_NATIVE_LAUNCHER=/usr/bin/gow3
+export PYTHONPATH="/usr/lib/gow3/python${PYTHONPATH:+:$PYTHONPATH}"
+mkdir -p -- "$GOW3_DATA_DIR"
+cd /usr/lib/gow3
+exec /usr/bin/python /usr/lib/gow3/launcher/gow3_launcher_win.py "$@"

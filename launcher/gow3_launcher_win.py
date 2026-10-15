@@ -692,6 +692,9 @@ def steam_icon(game):
 
 def steam_launch_command():
     """(program, launch options, start folder) with which Steam starts the game without the window."""
+    native = os.environ.get('GOW3_NATIVE_LAUNCHER')
+    if native:
+        return native, '--play', str(DATA_DIR)
     appimage = os.environ.get('APPIMAGE')
     if appimage:
         return appimage, '--play', str(Path(appimage).parent)
@@ -2198,7 +2201,7 @@ class Launcher:
             self.messagebox.showerror(APP_NAME, result.stderr.decode(errors='replace')[:400])
 
     def linux_shortcut(self):
-        launcher = os.environ.get('APPIMAGE') or (sys.executable if FROZEN else '')
+        launcher = os.environ.get('GOW3_NATIVE_LAUNCHER') or os.environ.get('APPIMAGE') or (sys.executable if FROZEN else '')
         command = f'"{launcher}"' if launcher else f'python3 "{Path(__file__).resolve()}"'
         icon_dir = Path.home() / '.local' / 'share' / 'icons'
         icon = icon_dir / 'gow3.png'

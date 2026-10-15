@@ -1,447 +1,90 @@
-# God of War III Remastered for PC 
+# Gow3Arch
 
-<div align="center">
-  <a href="https://ko-fi.com/S7O428PBCC" target="_blank"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
-</div>
+Native Arch Linux packaging of God of War III Remastered's PC runtime and launcher.
+Omarchy uses the same pacman package. This fork publishes `.pkg.tar.zst` packages;
+Windows and AppImage releases remain the responsibility of
+[the upstream project](https://github.com/FelipePrado0/gow3_pc).
 
-**English** | [Português (Brasil)](https://github.com/FelipePrado0/gow3_pc/blob/main/README.pt-BR.md) | [Español](https://github.com/FelipePrado0/gow3_pc/blob/main/README.es.md)
+## Install and update
 
-A PC port of **God of War III Remastered** (PlayStation 4) for Windows 10/11 and Linux
-(experimental AppImage).
-
-> **No game files are included.** You need a dump from your own PS4 (tested: CUSA01623 and
-> CUSA01715, versions 01.00 and 01.02).
-> This project is not affiliated with Sony Interactive Entertainment or Santa Monica Studio.
-> God of War is a trademark of Sony Interactive Entertainment.
-
-## Contents
-
-- [Download and play](#download-and-play)
-- [Linux (AppImage, experimental)](#linux-appimage-experimental)
-- [What works](#what-works)
-- [Feature availability](#feature-availability)
-- [Settings](#settings)
-- [Keyboard controls](#keyboard-controls)
-- [Importing shadPS4 saves](#importing-shadps4-saves)
-- [Third-party overlays (Windows)](#third-party-overlays-windows)
-- [Troubleshooting](#troubleshooting)
-- [Performance and compatibility](#performance-and-compatibility)
-- [Building from source](#building-from-source)
-- [Tests](#tests)
-- [How it works](#how-it-works)
-- [Credits](#credits)
-- [License](#license)
-
-## Download and play
-
-- Windows 10 (1903 or newer) or Windows 11, 64-bit.
-- A 64-bit processor with AVX: Intel Sandy Bridge (2011) or newer, AMD FX or newer. On CPUs without
-  MOVBE, BMI1 or LZCNT (Sandy/Ivy Bridge, AMD FX) the loader rewrites the game's instructions that
-  use them to emulated stubs and logs an `ISA:` line; performance on those CPUs has not been
-  measured yet. Older CPUs stop at start with a `STOP: this CPU lacks` line in the log.
-- A graphics card with Vulkan 1.3 and a current driver.
-- Your copy of the game (the folder with `eboot.bin`, `sce_module` and `sce_sys`). Tested:
-  CUSA01623 and CUSA01715, versions 01.00 and 01.02.
-
-**Steps**
-
-1. Download `gow3-windows.zip` from the
-   [Releases page](https://github.com/FelipePrado0/gow3_pc/releases/latest).
-2. Extract it to a folder of your choice, for example `C:\Games\gow3-windows`. Do not run it from
-   inside the zip.
-3. Open **`God of War III.exe`**. If Windows shows "Windows protected your PC", click
-   **More info**, then **Run anyway**: the program is not digitally signed.
-4. Click **Choose the game folder**. It takes you to the **Game** page. Next to **Game folder**,
-   click **Browse…** and select the folder with `eboot.bin`.
-5. Back on **Home**, the cover art and "CUSA01623 · version 01.02" appear. Adjust **Quick
-   settings** if you like: display mode, frame rate limit, render resolution and engine frame
-   rate.
-6. Click **Save** to keep pending changes, then **PLAY**. The first start prepares the game image;
-   shader compilation can also affect startup and performance on later launches.
-
-Patches and fixes are included and applied automatically: texture fix, skip videos with X and
-120 FPS are on by default. Change the resolution and frame rate on **Home** or **Performance**.
-The startup black-screen fix is always requested, even with an older saved patch selection;
-patches apply only where their signatures match. A resolution patch replaces the texture fix.
-
-**While playing**
-
-- **Insert** on the keyboard, or **R3 + L2** on the controller, opens the port's menu: cheats,
-  multipliers, image, performance and the performance overlay.
-- Saved shaders load in the background. A small "Loading shader cache" note in the corner shows
-  the progress.
-
-**Next time**
-
-- **`Play God of War III.exe`** starts the game straight away with your saved settings. You can
-  make a desktop shortcut to it, or add it to Steam with **Add a Non-Steam Game**.
-- Your saves, shader cache and log are in the `user` folder next to `God of War III.exe`. Keep
-  that folder when you update.
-- **Advanced → Check for updates** downloads and installs a new version. Your saves and settings
-  are kept.
-
-## Linux (AppImage, experimental)
-
-The Linux build runs the same native runtime and the same launcher. It was tested on Arch Linux
-with a Radeon RX 7800 XT (RADV) in a Wayland session.
-
-**You need:** x86-64 Linux with glibc 2.39 or newer, an AVX-capable CPU, a Vulkan 1.3 driver
-and your own game dump. Launcher startup is checked on Ubuntu 24.04, Debian 13, Fedora 42,
-Arch and openSUSE Tumbleweed; this does not establish gameplay compatibility on every GPU.
-
-**Download and run**
-
-1. Download `gow3-x86_64.AppImage` from the
-   [Releases page](https://github.com/FelipePrado0/gow3_pc/releases/latest).
-2. In its folder, run:
-   ```bash
-   chmod +x gow3-x86_64.AppImage
-   ./gow3-x86_64.AppImage
-   ```
-3. Choose your game folder, save the settings and press **PLAY**.
-
-If an older download reports `GLIBC_2.44 not found`, download the rebuilt AppImage again.
-The Windows updater is not available on Linux; download a newer AppImage to update.
-Steam Deck/RADV rendering corruption is a known issue in the published 2.2.0 AppImage.
-
-- **Files:** saves, settings, shader cache and the log are in `~/.local/share/gow3`; the launcher's
-  own settings in `~/.config/gow3-launcher`.
-- **Update folder:** if the update was dumped apart from the game, choose it under **Game → Update
-  folder**. It is laid over the game folder without changing either.
-- **Advanced → Linux:** window system (automatic, Wayland or X11), GameMode and MangoHud. Only the
-  tools installed on the system can be turned on.
-- **Steam:** **Advanced → Add to Steam** adds "God of War III Remastered" as a non-Steam game, with
-  the icon, the vertical and horizontal capsules, the library background and the logo made from the
-  dump's pictures. Close Steam first (it rewrites its shortcuts when it exits). The button is also in
-  the Windows launcher (not tested there yet).
-- **Menu entry:** the AppImage writes `~/.local/share/applications/gow3.desktop` when it starts, so
-  the launcher and the game window show their icon in the dock; **Advanced → Linux** turns it off and
-  removes the entry.
-
-## What works
-
-- Opening, menus, video cutscenes (H.264) and gameplay.
-- Audio: music, voices and effects (ATRAC9 and MP3).
-- Controller (DualSense, Xbox and others, through SDL3) and keyboard at the same time, both
-  remappable.
-- **In-game button icons** (opt-in, off by default): the PlayStation button icons in the game can
-  show your controller's, Xbox or Nintendo ones (Game page, Controls).
-- Saving and loading: the save list is shown on screen, as on the PS4. Autosave works too. The
-  launcher backs the saves up before every start.
-- Patches: render resolution of 480p, 720p, 1440p, 1800p or 4K, corrupted texture fix and skip
-  videos with the X button (community); engine frame rate of 120 FPS (kvicken) or 240 FPS
-  (adapted by Felipe Prado).
-- **Background shader compilation:** saved pipelines load and compile in the background while
-  you play. Stutters, missing effects during compilation and temporary FPS drops can still occur;
-  startup time depends on the cache, graphics driver and CPU.
-- **Launcher** in the game's colors, with selectable languages and English fallback: five pages
-  (**Home, Graphics, Performance, Game, Advanced**) and a **Save** button for pending changes;
-  quick settings on the home page, graphics,
-  performance, game folder and save backups, patches, mods (order, presets and conflicts),
-  controls with PlayStation or Xbox button icons, updates and diagnostics.
-- **In-game menu** (Insert on the keyboard, R3+L2 on the controller), with four tabs:
-  - **Game:** cheats (infinite health, magic, item meter, Rage of Sparta, max red orbs);
-    multipliers from 0.1x to 100x for red, green (health), blue (magic) and gold (Rage of
-    Sparta) orbs and for damage dealt and taken; an enemy health bar.
-  - **Image:** display mode (windowed, borderless, fullscreen), VSync and RCAS sharpening.
-  - **Performance:** frame rate limit (30 to unlimited), frames queued, background shader
-    compiling; render resolution, engine frame rate and GPU readback options apply with one
-    "Apply and restart" button.
-  - **Overlay:** a performance overlay with FPS, frametime, upscaler, GPU (name and use), CPU,
-    RAM and VRAM, each optional, with font size, corner, background opacity and layout. The
-    numbers are the game's own use, not the whole system's.
-
-## Feature availability
-
-Availability checked against [release 2.2.0](https://github.com/FelipePrado0/gow3_pc/releases/tag/windows-v2.2.0) and the source on October 14, 2026.
-
-| Feature | Published 2.2.0 packages | Current source |
-|---|---|---|
-| Windows ZIP / experimental Linux AppImage | Available | Build scripts available |
-| Startup black-screen patch / controller button icons | Included | Included |
-| Discord Rich Presence | Not included | Optional under Advanced, off by default; game name and elapsed time |
-| RADV sparse-queue fix | Not included | Merged into `main` |
-| FSR 1, FSR 3.1, FSR 4, TAA, DLSS | Disabled | Disabled in the launcher/game settings path |
-| RCAS sharpening | Available | Available |
-
-The Linux AppImage was rebuilt on October 14 for glibc 2.39 or newer. The Windows and Linux
-packages can use different source revisions. Check the release notes for changes to later downloads.
-
-## Settings
-
-Settings are kept in `gow3.ini` (the game and the in-game menu) and in
-`%APPDATA%\gow3-launcher\settings.json` (the launcher). Saves, the shader cache and
-`last_run.log` go to the project's `user` folder.
-
-On **Performance → GPU data → Stream buffer memory**, choose **System RAM (cached, default)**,
-**System RAM (uncached)** or **GPU memory (previous behavior)**. System RAM can improve frame
-rates on NVIDIA laptops. The choice is saved and applies on the next game launch, including
-when using `Play God of War III.exe` or `--play`. Choose GPU memory to restore the previous
-allocation behavior. For direct launches without the launcher, `GOW3_STREAM_MEMORY` accepts
-`cached`, `host` or `device`; the launcher's saved choice takes precedence when using it.
-
-On **Performance → GPU data → Game multisampling**, **Automatic** lets the game decide by the
-graphics card it runs on: it creates the game's multisampled images with a single sample on
-AMD's and Intel's Windows drivers, where reading the 2-sample depth buffer as a texture
-produced black lines in the lighting (Radeon RX 6600 family, Arc), and keeps them multisampled
-elsewhere (NVIDIA). The label names the card and the decision, for example "Automatic (Intel(R)
-Arc(TM) A750 Graphics: off)", and follows the **Graphics card** choice. The rule covers every
-GPU on those two drivers, integrated ones included; the game's log line `GPU: guest
-multisampling off` or `on` is what was applied. Choose **Off** if the lines appear on another
-card and **On** to keep multisampling anyway. Off and On set `GOW3_NO_MSAA=1` or `0`; Automatic
-passes an inherited `GOW3_NO_MSAA` through. Applies on the next game launch.
-
-## Keyboard controls
-
-Defaults; change them in the launcher's **Game** page, **Controls** section.
-
-| Key | Button |
-|---|---|
-| WASD | left stick |
-| Arrows | right stick (camera) |
-| Space | Cross |
-| Left Shift | Circle |
-| E | Square |
-| Q | Triangle |
-| 1 and 3 | L1 and R1 |
-| R and F | L2 and R2 |
-| Z and C | L3 and R3 |
-| I, K, J, L | d-pad |
-| Enter | Options |
-| Tab | left touchpad click (photo mode) |
-| Backspace | right touchpad click (pause menu) |
-| Insert | the port's menu (R3+L2 on the controller) |
-
-On a controller without a touchpad (Xbox and others), View opens the pause menu (the right
-touchpad click) and L1 + View opens photo mode (the left click). On a DualSense the touchpad
-works as on the PS4, and Share/Create works like View.
-
-**In-game button icons** (off by default) are chosen in the launcher's Game page, Controls section, under
-*In-game button icons*: *Match my controller*, *Xbox* or *Nintendo*. They replace the PlayStation icons in the
-tutorial, move-list and quick-time prompts; the pause-menu controller drawing stays a DualShock 4.
-The launcher writes a patched copy of two game files into the port's data folder and never changes
-your game folder. A new controller is picked up after a restart. Without the launcher, set
-`GOW3_GLYPH_STYLE` to `auto`, `xbox` or `nintendo` before starting `run.py`.
-
-In the menu: L1/R1 or Q/E switch tabs. In the save list: arrows or the d-pad choose, Enter or
-Cross confirm, Esc or Circle cancel.
-
-## Importing shadPS4 saves
-
-Only **shadPS4 saves for God of War III Remastered** are compatible. RPCS3 saves are
-from the PS3 game and will not work. Use the same title ID (this example uses `CUSA01623`).
-
-1. Close the game and shadPS4. Back up both save folders.
-2. Find the source in shadPS4's data folder: `user\savedata\1\CUSA01623\` in older
-   versions, or `home\<user-id>\savedata\CUSA01623\` in newer versions.
-3. The destination is **`user\savedata\1\CUSA01623\` next to `God of War III.exe`**.
-   Example: `C:\Games\gow3-windows\user\savedata\1\CUSA01623\`. With a custom
-   **Saves folder** in the launcher, use `<custom folder>\savedata\1\CUSA01623\`.
-4. Copy each slot folder there, keeping its name and game files. Do not nest another
-   `CUSA01623` folder. Exclude the slot's internal `sce_sys` folder from the game data.
-5. Beside each slot, create `<slot name>.sce_sys` if it does not exist. You can copy
-   shadPS4's `sce_sys\icon0.png` there. **Do not rename `param.sfo` to `param.bin`**:
-   the formats differ. Preserve any existing port `param.bin`. Without one, the slot
-   appears by folder name; saving again in the port writes its metadata and refreshes
-   the displayed information.
-6. Start the port and select **Load Game**. Completed saves can be imported too.
-
-The port's save dialog displays at most **32 entries**. If the imported slot is missing
-from a long list, test it with a separate **Saves folder** containing just that slot
-under `savedata\1\CUSA01623\`, with its sibling metadata folder. Keep the original saves
-and restore the previous Saves folder setting after testing.
-
-## Third-party overlays (Windows)
-
-The game process is **`bin\gow3-probe.exe`**, not `God of War III.exe` (source builds
-use `out\gow3-probe.exe`). Add that executable to RTSS and enable Afterburner's on-screen
-display. In the ReShade installer, select that same executable and the **Vulkan** API.
-
-If the overlay still does not appear, report the port and overlay versions, the last
-working port version, and attach `user\last_run.log`. These checks do not confirm a fix
-for every overlay configuration.
-
-## Troubleshooting
-
-- Black screen at start: use the latest release, which includes the startup deadlock patch.
-  If it persists, report your GPU, driver, game build and **Advanced → Log** output. Clearing
-  the shader cache is not a general fix and requires rebuilding it on the next launch.
-- The game closes with "cannot create ... guest memory (error 1450)": Windows ran out of virtual memory to allocate the guest pool. Increase the page file: press **Win + R**, type `SystemPropertiesAdvanced`, go to **Performance** Settings → **Advanced** → **Virtual memory** Change, uncheck automatic management, select drive **C:**, set a custom size (e.g. 16384 MB initial, 24576 MB maximum), click **Set**, **OK**, and restart your PC.
-- The game does not open: check **Advanced → Log**, or send `user\last_run.log` with your report.
-  With a custom **Saves folder**, `last_run.log` is in that folder instead.
-- Yellow/orange/white textures or wrong lighting: try disabling **Performance → GPU data →
-  Deferred GPU readbacks**, then restart. This workaround can cause stutters.
-- GPU-specific rendering failures, crashes, audio problems and progress blockers remain under
-  investigation. Check the [release notes](https://github.com/FelipePrado0/gow3_pc/releases/latest)
-  and [issues](https://github.com/FelipePrado0/gow3_pc/issues) before reporting; include a save
-  from before the problem when relevant.
-
-## Performance and compatibility
-
-Previous testing on an AMD Radeon RX 6700 XT, Ryzen 5 5600X and 32 GB recorded 144 FPS on
-average (55 to 240) at 1080p with the 240 FPS engine frame rate. These are reference results,
-not a benchmark of every release or a guarantee for other systems.
-
-**Tested and playable from start to finish** at native 1080p with the 240 FPS engine frame
-rate on the test system. Texture corruption, crashes and progress blockers have also been
-reported on other setups, including at 1080p. See the known issues in the release notes.
-
-## Building from source
-
-### Windows
-
-Install Python 3.10 or newer from python.org, with Tk support, then install the launcher and
-instruction-rewrite dependencies in PowerShell:
-
-```powershell
-python -m pip install pillow iced-x86==1.21.0
-```
-
-The following build commands use MSYS2 CLANG64; launcher commands marked PowerShell use the
-Windows Python installation.
-
-Development happens on the `gow3` branch; `main` receives tested merges.
-
-1. Install MSYS2 (`winget install MSYS2.MSYS2`) and, in the **MSYS2 CLANG64** shell, the
-   packages listed in [packaging/windows/README.md](https://github.com/FelipePrado0/gow3_pc/blob/main/packaging/windows/README.md).
-2. Clone the repository with its submodules and build:
-
-   ```bash
-   git clone --recursive https://github.com/FelipePrado0/gow3_pc
-   cd gow3_pc
-   git checkout gow3   # development branch; omit to build main
-   bash build.sh
-   ```
-
-3. Start the launcher (in PowerShell, in the project folder):
-
-   ```powershell
-   python launcher/gow3_launcher_win.py
-   ```
-
-4. On **Game**, choose the game folder and patches. Adjust **Graphics** and **Performance**,
-   click **Save** for pending changes, then **PLAY**.
-
-To play with the saved settings without opening the launcher's window (for a shortcut or Steam):
-
-```powershell
-python launcher/gow3_launcher_win.py --play
-```
-
-Or without the launcher at all:
-
-```powershell
-$env:GOW3_GAME_DIR = 'D:\path\CUSA01623'
-python run.py
-```
-
-### Linux (Ubuntu 24.04)
-
-For a fresh checkout, run the following in a Linux shell. The dependency script installs system
-packages using sudo, selects GCC 14 as the default compiler and creates `out/venv` with
-PyInstaller, Pillow and iced-x86. It is intended for Ubuntu 24.04; adapt dependencies for other
-distributions. If already cloned, start in the repository and skip the first two commands.
+Run the same command for a first installation and subsequent updates:
 
 ```bash
-git clone --recursive https://github.com/FelipePrado0/gow3_pc
-cd gow3_pc
-bash packaging/linux/ci-deps.sh
-bash build.sh
-out/venv/bin/python launcher/gow3_launcher_win.py
+curl -fsSL https://github.com/zamkara/Gow3Arch/releases/latest/download/install.sh | bash
 ```
 
-To package an AppImage after the build:
+The script requires Arch Linux x86_64, curl and Python. It downloads the latest
+published package, verifies SHA-256 against the same release, compares versions
+with pacman's `vercmp`, and skips an installed version that is already current or
+newer. Downloads do not require root; only the pacman transaction uses sudo.
+Authentication and confirmation read from the terminal, including when piped to
+bash. Checksums detect corruption; release authenticity relies on GitHub HTTPS
+and this repository's access controls, not an independent package signature.
+
+Alternatively download the package and `SHA256SUMS` from
+[Releases](https://github.com/zamkara/Gow3Arch/releases/latest), verify the package's
+checksum, and install it with `sudo pacman -U ./gow3-*.pkg.tar.zst`.
+This repository is not a pacman sync repository: use the command above for updates.
+Do not partially upgrade an Arch installation; keep your system repositories current.
+
+## Run
+
+Open **God of War III Remastered** in your application menu or run `gow3`.
+Choose your game dump, save your settings and press Play. `gow3 --play` uses saved
+settings; the desktop entry also offers a Play action. Steam shortcuts use the
+native wrapper so the writable paths and private Python dependency are preserved.
+
+You need an x86_64 CPU with AVX, a Vulkan 1.3 capable GPU and its driver, and your
+own PS4 game dump. No game files, firmware, proprietary FSR models, GPU drivers,
+Wine, AppImage runtime or frozen Python interpreter are shipped. Upstream supports
+CUSA01623 and CUSA01715, versions 01.00 and 01.02; this fork's CI checks packaging
+and launcher startup, not gameplay or every GPU/Wayland setup.
+
+Pacman manages system libraries, Python, Tk and Pillow. The checksum-pinned
+iced-x86 ABI3 module is installed privately under `/usr/lib/gow3/python` because
+it is not in the official Arch repositories. It never replaces system Python
+packages. Build tools are not needed to play. Vulkan drivers remain host-managed.
+
+## User files and removal
+
+- Game settings, saves, prepared files, mods and caches: `${XDG_DATA_HOME:-~/.local/share}/gow3`.
+- Launcher settings: `${XDG_CONFIG_HOME:-~/.config}/gow3-launcher`.
+- `GOW3_DATA_DIR` overrides the game data directory.
+- Program files: `/usr/lib/gow3`; command: `/usr/bin/gow3`.
+
+Remove the package with `sudo pacman -Rns gow3`. Your saves and configuration remain
+in your home directory. Remove those two data directories separately only if you
+want to erase your own data. Launcher's self-installers for Windows/AppImage are
+not used by the native package.
+
+## Build and release
 
 ```bash
-PATH="$PWD/out/venv/bin:$PATH" bash packaging/linux/build.sh
-./dist/gow3-x86_64.AppImage
+git clone https://github.com/zamkara/Gow3Arch.git
+cd Gow3Arch/packaging/arch
+GOW3_COMMIT=$(git rev-parse HEAD) makepkg -s
 ```
 
-The build environment is created before the packaging command. Building on a newer distribution
-can require a newer glibc; public release builds use Ubuntu 24.04. From the repository, use
-`out/venv/bin/python launcher/gow3_launcher_win.py --play` for saved launcher settings, or
-`GOW3_GAME_DIR=/path/to/CUSA01623 out/venv/bin/python run.py` for a direct launch.
+The recipe pins the complete source commit, follows its pinned submodules and
+verifies downloaded VMA and iced-x86 assets. `GOW3_COMMIT` must be a full commit
+hash. The default recipe revision is a known source checkpoint; the command above
+builds your current checkout revision. Runtime binaries are compiled for generic
+x86_64 without host-specific CPU tuning. LTO and PGO are disabled for predictable
+CI resource use; build concurrency defaults to two jobs.
 
-## Tests
+The GitHub workflow builds in a disposable Arch container as an unprivileged
+user, runs regression tests, then installs the resulting package in a fresh Arch
+container and opens the launcher as an unprivileged user on Xvfb. It checks shared
+libraries and clean package removal before publishing. Pushes to main and manual
+runs publish a complete release tagged with the source commit hash; pull requests
+only build and test. Failed builds do not publish a release. Only native Arch
+artifacts are produced. Upstream changes are merged and reviewed in this fork;
+there is no unattended upstream merge or claim of automatic daily synchronization.
 
-Run these from the repository root after the build. The first C++ checks below do not need a game dump.
-
-### Python
-
-On Windows, use PowerShell. On Linux, replace `python` with `out/venv/bin/python`.
-
-```powershell
-python -m unittest discover -s tests -p "test_*.py"
-```
-
-### Windows C++ tests (MSYS2 CLANG64)
-
-```bash
-source ./msys2-env.sh
-ninja -C out/gpu perf-overlay-test warmup-inbox-test graphics-settings-test
-out/gpu/perf-overlay-test.exe
-out/gpu/warmup-inbox-test.exe
-out/gpu/graphics-settings-test.exe
-```
-
-### Linux C/C++ tests
-
-```bash
-bash build.sh --test
-ninja -C out/gpu perf-overlay-test warmup-inbox-test graphics-settings-test
-out/gpu/perf-overlay-test
-out/gpu/warmup-inbox-test
-out/gpu/graphics-settings-test
-```
-
-`bash build.sh --test` runs the additional C runtime tests on Linux only. On Windows the build exits before that block; use the Ninja targets above.
-
-### Checks using a prepared game
-
-After preparing your own dump, `out/eboot.elf` and `out/boot-linked.bin` are needed for the
-following checks. In MSYS2 CLANG64 on Windows, replace the example game path with yours:
-
-```bash
-ninja -C out/gpu stat-multipliers-test
-out/gpu/stat-multipliers-test.exe out/eboot.elf
-out/gow3-probe.exe out/boot-linked.bin --app0 "D:/Games/CUSA01623" --check-imports
-```
-
-On Linux, use `out/gpu/stat-multipliers-test` and `out/gow3-probe` without `.exe`, and a Linux
-game path. `--check-imports` checks system imports and exits without starting gameplay.
-More test targets are listed in [gpu/CMakeLists.txt](https://github.com/FelipePrado0/gow3_pc/blob/main/gpu/CMakeLists.txt).
-
-## How it works
-
-The CPU side is native: the game's original executable runs directly on the PC's processor (the
-PS4 uses the same x86-64 architecture), and a runtime written for this game replaces the PS4
-system libraries, without CPU emulation. The graphics are translated: they run on the
-[shadPS4](https://github.com/shadps4-emu/shadPS4) video core, which converts the PS4 GPU commands
-and shaders to Vulkan, with the God of War III rendering fixes from
-[cuesta4's `eltutz` branch](https://github.com/cuesta4/shadPS4/tree/eltutz). Running the game code
-directly on the CPU is also how shadPS4 works; what this project changes is the system layer and
-the game-specific work (patches, background shader cache, launcher and in-game menu).
-It is a fork of [Supermedo's Windows port](https://github.com/Supermedo/bloodborne_pc) of
-[deadinside28's bloodborne_pc](https://github.com/deadinside28/bloodborne_pc) (see
-[Credits](#credits)).
-
-- The patches and the in-game hooks (cheats, multipliers, health bar) find their sites by
-  signature: the original bytes around each one, wherever a release placed that code
-  (`tools/make_signatures.py`). A site that is not found leaves only that patch or hook off; the
-  game starts without it, and the log and the menu say why.
-
-| Part | Where | What it does |
-|---|---|---|
-| Preparation | `scripts/` | Reads `eboot.bin`, applies its relocations and links the game's own `libc` and `libSceFios2` into one image |
-| Loader | `src/probe.c` | Loads the image, installs the validated hooks (cheats, multipliers, health bar) and starts the game's original code |
-| Runtime | `src/runtime_*.c` | Reimplements the PS4 system functions: memory, threads, files, audio, video, controller, saves and services |
-| GPU | `gpu/shadps4/` | The shadPS4 video core, translating the PS4 GPU commands and shaders to Vulkan, with cuesta4's God of War III fixes (`eltutz` branch) and this port's speed work (background shader cache, deferred readbacks) |
-| In-game menu | `gpu/shim/gow3_overlay.cpp` | The Dear ImGui menu and performance overlay; settings in `gpu/shim/gow3_settings.cpp` |
-| Patches | `patches/God_of_War_III_Remastered.xml`, `scripts/patches.py` | Applied in memory at start, without changing the game files |
-| Launcher | `launcher/gow3_launcher_win.py` | Settings, patches, mods, controls and the play button |
-
-More documentation: [mods](https://github.com/FelipePrado0/gow3_pc/blob/main/docs/MODS.md), [frame map and historical upscaler research](https://github.com/FelipePrado0/gow3_pc/blob/main/docs/upscaler.md)
-and [parallel GPU work](https://github.com/FelipePrado0/gow3_pc/blob/main/docs/parallel_gpu.md).
+See [upstream documentation](docs/UPSTREAM.md) for runtime behavior, controls,
+known limitations and development details. Its Windows/AppImage instructions refer
+to upstream releases, not Gow3Arch. Translated upstream READMEs are retained as
+historical upstream documentation.
 
 ## Credits
 

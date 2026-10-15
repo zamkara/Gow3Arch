@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=God of War III Remastered
+Comment=Native PC runtime for your own God of War III Remastered dump
+Exec=gow3
+TryExec=gow3
+Icon=gow3
+Categories=Game;
+Terminal=false
+StartupWMClass=gow3
+Actions=Play;
+
+[Desktop Action Play]
+Name=Play with saved settings
+Exec=gow3 --play

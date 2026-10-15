@@ -1,0 +1,83 @@
+# Maintainer: Zam <https://github.com/zamkara>
+pkgname=gow3
+pkgver=2.3.0.r0.g015ffd8
+pkgrel=1
+pkgdesc='God of War III Remastered native runtime and launcher for Arch Linux'
+arch=('x86_64')
+url='https://github.com/zamkara/Gow3Arch'
+license=('GPL-2.0-or-later' 'MIT')
+depends=('glibc' 'gcc-libs' 'vulkan-icd-loader' 'sdl3' 'ffmpeg' 'fmt' 'xxhash'
+         'zydis' 'libx11' 'python' 'python-pillow' 'tk' 'xdg-utils')
+makedepends=('git' 'cmake' 'ninja' 'pkgconf' 'boost' 'robin-map' 'vulkan-headers'
+             'glslang' 'spirv-tools' 'python-installer')
+checkdepends=('xorg-server-xvfb' 'xorg-xauth' 'ttf-dejavu' 'desktop-file-utils')
+optdepends=('vulkan-driver: Vulkan 1.3 capable GPU driver'
+            'vulkan-tools: GPU diagnostics' 'gamemode: game performance management'
+            'mangohud: performance overlay')
+options=('!lto' '!debug')
+_commit=${GOW3_COMMIT:-015ffd8c37c5c2e4f45ac2f514a368672195d7e1}
+[[ $_commit =~ ^[0-9a-f]{40}$ ]] || return 1
+_wheel=iced_x86-1.21.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+source=("gow3::git+https://github.com/zamkara/Gow3Arch.git#commit=$_commit"
+        "https://files.pythonhosted.org/packages/5d/08/054cac5c4f435a243e423323783992c78c7c2f22cf2269fcca145b8423af/$_wheel"
+        'vk_mem_alloc.h::https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/v3.1.0/include/vk_mem_alloc.h')
+sha256sums=('SKIP'
+            '489789377bfc1fe432bd2a8a5780c9f3e7c35be2e6133b0de5432cd901cad32c'
+            'f063056705f2cd0ddd8d9da034f673b09814ca96aa45a958e9e687bf9f3fed15')
+noextract=("$_wheel")
+
+pkgver() {
+    cd "$srcdir/gow3"
+    local version
+    version=$(sed -n "s/^VERSION = '\([^']*\)'/\1/p" launcher/gow3_launcher_win.py)
+    printf '%s.r%s.g%s' "$version" "$(git rev-list --count HEAD)" "$(git rev-parse --short=12 HEAD)"
+}
+
+prepare() {
+    cd "$srcdir/gow3"
+    git submodule update --init --recursive
+    install -Dm644 "$srcdir/vk_mem_alloc.h" "$srcdir/headers/vk_mem_alloc.h"
+}
+
+build() {
+    cd "$srcdir/gow3"
+    export GOW3_PGO=off GOW3_LTO=OFF
+    export GOW3_BUILD_JOBS=${GOW3_BUILD_JOBS:-2}
+    export CMAKE_INCLUDE_PATH="$srcdir/headers${CMAKE_INCLUDE_PATH:+:$CMAKE_INCLUDE_PATH}"
+    bash build.sh
+}
+
+check() {
+    cd "$srcdir/gow3"
+    out/gow3-probe --cpu-features
+    desktop-file-validate "$startdir/gow3.desktop"
+    # Run Python regression tests on a virtual X display, without a game dump.
+    xvfb-run -a python -m unittest discover -s tests -p 'test_*.py'
+}
+
+package() {
+    cd "$srcdir/gow3"
+    local dest="$pkgdir/usr/lib/gow3"
+    install -Dm755 out/gow3-probe "$dest/bin/gow3-probe"
+    install -Dm755 out/gow3-gpu-capabilities "$dest/bin/gow3-gpu-capabilities"
+    install -Dm755 out/gpu/libgow3gpu.so "$dest/bin/gpu/libgow3gpu.so"
+    install -Dm644 run.py "$dest/run.py"
+    install -Dm755 run.sh "$dest/run.sh"
+    cp -a launcher scripts patches "$dest/"
+    find "$dest" -type d -name __pycache__ -prune -exec rm -rf {} +
+    # iced-x86 is private to this application, never installed over system Python packages.
+    python -m installer --destdir="$srcdir/iced-install" "$srcdir/$_wheel"
+    install -d "$dest/python"
+    cp -a "$srcdir/iced-install"/usr/lib/python*/site-packages/. "$dest/python/"
+    install -Dm755 "$startdir/gow3" "$pkgdir/usr/bin/gow3"
+    install -Dm644 "$startdir/gow3.desktop" "$pkgdir/usr/share/applications/gow3.desktop"
+    install -Dm644 launcher/gow3.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/gow3.png"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/gow3/LICENSE"
+    install -Dm644 "$dest/python/iced_x86-1.21.0.dist-info/LICENSE.txt" "$pkgdir/usr/share/licenses/gow3/iced-x86-LICENSE"
+    for component in gpu/third_party/fsr-vulkan gpu/third_party/imgui third_party/LibAtrac9 gpu/third_party/magic_enum gpu/third_party/miniz gpu/third_party/xbyak; do
+        for file in "$component"/LICENSE* "$component"/LICENCE* "$component"/COPYING*; do
+            [[ ! -f $file ]] || install -Dm644 "$file" "$pkgdir/usr/share/licenses/gow3/$(basename "$component")-$(basename "$file")"
+        done
+    done
+    install -Dm644 README.md "$pkgdir/usr/share/doc/gow3/README.md"
+}
