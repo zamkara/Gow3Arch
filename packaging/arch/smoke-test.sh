@@ -17,6 +17,13 @@ for binary in /usr/lib/gow3/bin/gow3-probe /usr/lib/gow3/bin/gow3-gpu-capabiliti
 done
 # Private Python dependency is available without pip or PyInstaller.
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/lib/gow3/python python -c 'import iced_x86; from PIL import Image; import tkinter'
+python - <<'PYINFO'
+import json,pathlib,re
+info=json.loads(pathlib.Path('/usr/lib/gow3/build-info.json').read_text())
+assert re.fullmatch(r'[0-9a-f]{40}',info['commit'])
+assert info['package_version']
+print('Native build identity:',info['commit'],info['package_version'])
+PYINFO
 /usr/lib/gow3/bin/gow3-probe --cpu-features
 useradd -m player
 work=$(mktemp -d)

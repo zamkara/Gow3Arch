@@ -64,6 +64,7 @@ jobs:
           done
           python3 -m unittest discover -s tests -p 'test_arch_packaging.py' -v
           python3 -m unittest discover -s tests -p 'test_gpu_user_paths.py' -v
+          python3 -m unittest discover -s tests -p 'test_overlay_cadence.py' -v
 
   build:
     needs: [sync, validate]

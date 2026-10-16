@@ -34,7 +34,9 @@ class ControlMapTest(unittest.TestCase):
 
     def test_pipeline_binary_cache_switch(self):
         settings = {**launcher.APP_DEFAULTS}
-        self.assertTrue(settings['pipeline_binary_cache'])
+        self.assertFalse(settings['pipeline_binary_cache'])
+        self.assertEqual(launcher.game_environment(settings)['GOW3_PIPELINE_BINARIES'], '0')
+        settings['pipeline_binary_cache'] = True
         self.assertEqual(launcher.game_environment(settings)['GOW3_PIPELINE_BINARIES'], '1')
         settings['pipeline_binary_cache'] = False
         self.assertEqual(launcher.game_environment(settings)['GOW3_PIPELINE_BINARIES'], '0')

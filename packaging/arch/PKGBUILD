@@ -66,6 +66,10 @@ package() {
     install -Dm755 out/gow3-gpu-capabilities "$dest/bin/gow3-gpu-capabilities"
     install -Dm755 out/gpu/libgow3gpu.so "$dest/bin/gpu/libgow3gpu.so"
     install -Dm644 run.py "$dest/run.py"
+    python - "$dest/build-info.json" "$pkgver-$pkgrel" "$_commit" <<'PYBUILD'
+import json,pathlib,sys
+pathlib.Path(sys.argv[1]).write_text(json.dumps({'package_version':sys.argv[2], 'commit':sys.argv[3]},indent=2)+'\n')
+PYBUILD
     install -Dm755 run.sh "$dest/run.sh"
     cp -a launcher scripts patches "$dest/"
     find "$dest" -type d -name __pycache__ -prune -exec rm -rf {} +

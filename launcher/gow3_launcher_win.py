@@ -61,6 +61,18 @@ UI_FONT, MONO_FONT, SERIF_FONT = 'Segoe UI', 'Consolas', 'Georgia'
 VERSION = '2.3.0'
 RELEASES_API = 'https://api.github.com/repos/FelipePrado0/gow3_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/FelipePrado0/gow3_pc/releases/latest'
+def build_label():
+    """Distinguish installed native builds without changing upstream's app version."""
+    try:
+        info = json.loads((PORT_DIR / 'build-info.json').read_text(encoding='utf-8'))
+        commit = info.get('commit', '')
+        if re.fullmatch(r'[0-9a-f]{40}', commit):
+            return f'v{VERSION} · Arch {commit[:12]}'
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return f'v{VERSION}'
+
+
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'gow3-update'
 # Never copied over an installation by an update (the package does not hold them either).
 USER_FILES = ('user', 'out', 'mods', 'gow3.ini', 'mods.json', 'mods_presets.json', 'patches.json', 'last_run.log')
@@ -312,7 +324,7 @@ APP_DEFAULTS = {'ui_language': 'en', 'game_dir': os.environ.get('GOW3_GAME_DIR',
                 'video_backend': 'auto', 'gamemode': False, 'mangohud': False, 'desktop_integration': True, 'user_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
                 'hdr': False, 'draw_pipe': '', 'readbacks': '', 'no_msaa': '', 'stream_memory': 'cached',
-                'gpu_id': '', 'partial_height_views': True, 'background_warmup': True, 'parallel_warmup': True, 'pipeline_binary_cache': True,
+                'gpu_id': '', 'partial_height_views': True, 'background_warmup': True, 'parallel_warmup': True, 'pipeline_binary_cache': False,
                 'perf_diag': False, 'frame_capture_key': False, 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'close_on_play': False, 'discord_rpc': False,
                 'check_updates': False, 'game_patches': {}, 'controls': {}, 'pad_style': 'playstation',
@@ -756,7 +768,7 @@ def game_environment(s):
         env['GOW3_GPU_ID'] = gpu_id
     env['GOW3_BACKGROUND_WARMUP'] = '1' if s.get('background_warmup', True) else '0'
     env['GOW3_PARALLEL_WARMUP'] = '1' if s.get('parallel_warmup', True) else '0'
-    env['GOW3_PIPELINE_BINARIES'] = '1' if s.get('pipeline_binary_cache', True) else '0'
+    env['GOW3_PIPELINE_BINARIES'] = '1' if s.get('pipeline_binary_cache', False) else '0'
     env['GOW3_PERF_DIAG'] = '1' if s.get('perf_diag', False) else '0'
     env['GOW3_PARTIAL_HEIGHT_VIEWS'] = '1' if s.get('partial_height_views', True) else '0'
     for key, name in (('frame_stats', 'GOW3_FRAME_STATS'), ('gpu_profile', 'GOW3_GPU_PROFILE'),
@@ -1083,7 +1095,7 @@ class Launcher:
                                                'В игре: Insert или R3+L2\nоткрывает меню порта.'),
                                   bg=BG, fg=MUTED, font=(UI_FONT, 9), justify='left', wraplength=self.px(210))
         self.side_note.pack(anchor='w', padx=22, pady=(0, 4))
-        tk.Label(side, text=f'v{VERSION}', bg=BG, fg=MUTED, font=(UI_FONT, 9)).pack(anchor='w', padx=22, pady=(0, 18))
+        tk.Label(side, text=build_label(), bg=BG, fg=MUTED, font=(UI_FONT, 9)).pack(anchor='w', padx=22, pady=(0, 18))
 
         right = tk.Frame(self.root, bg=PANEL)
         right.pack(side='left', fill='both', expand=True)
@@ -1588,7 +1600,7 @@ class Launcher:
                        ).pack(side='left')
         ttk.Button(holder, text=_('Desktop shortcut', 'Ярлык на рабочем столе'), command=self.shortcut).pack(side='left', padx=6)
         ttk.Button(holder, text=_('Add to Steam'), command=self.add_to_steam).pack(side='left')
-        ttk.Label(holder, text=f'v{VERSION}', style='Muted.TLabel').pack(side='left', padx=10)
+        ttk.Label(holder, text=build_label(), style='Muted.TLabel').pack(side='left', padx=10)
         if not WINDOWS:
             self.build_linux_options(f)
         self.section(f, _('Files'))

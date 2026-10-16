@@ -52,6 +52,12 @@ The performance overlay defaults to a one-second refresh interval. Change
 Update interval** in the in-game menu to 1, 2, 5 or 10 seconds. Both use the same
 `overlay_interval_ms` key in `gow3.ini`; this affects displayed readings, not FPS.
 
+The launcher shows `Arch <commit>` beside its version for native packages. Compare
+that build identity after an update; an already running launcher or game must be
+restarted to load updated Python code and GPU libraries. The experimental pipeline
+binary cache is disabled by default; enabling it is an explicit A/B test and may
+trigger driver failures. Existing saved preferences are preserved on upgrades.
+
 ## User files and removal
 
 - Game settings, saves, prepared files, mods and caches: `${XDG_DATA_HOME:-~/.local/share}/gow3`.

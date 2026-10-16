@@ -225,7 +225,8 @@ std::string Instance::GetDriverVersionName() {
 namespace {
 bool PipelineBinaryCacheRequested() {
     const char* setting = std::getenv("GOW3_PIPELINE_BINARIES");
-    return !setting || *setting != '0';
+    // Experimental driver entry points are opt-in, including for CLI launches.
+    return setting && *setting == '1';
 }
 }
 

@@ -40,6 +40,7 @@ PY
 (cd "$work" && sha256sum --check package.sha256)
 available=$(pacman -Qp "$work/$package" | awk '{print $2}')
 installed=$(pacman -Q gow3 2>/dev/null | awk '{print $2}' || true)
+printf 'Installed: %s\nAvailable: %s\n' "${installed:-not installed}" "$available"
 if [[ -n $installed && $(vercmp "$installed" "$available") -ge 0 ]]; then
     echo "gow3 $installed is already current."
     exit 0
@@ -50,3 +51,7 @@ else
     sudo pacman -U -- "$work/$package" </dev/tty
 fi
 echo "gow3 $available installed. Run: gow3"
+
+if [[ -n $installed ]]; then
+    echo "Restart the launcher and game to load the updated build."
+fi

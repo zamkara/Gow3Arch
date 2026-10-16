@@ -105,6 +105,18 @@ class NativeIntegrationTests(unittest.TestCase):
             self.assertEqual(launcher.steam_launch_command(),
                              ('/usr/bin/gow3', '--play', str(launcher.DATA_DIR)))
 
+    def test_launcher_identifies_native_build_and_handles_missing_metadata(self):
+        sys.path.insert(0, str(ROOT / 'launcher'))
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        import gow3_launcher_win as launcher
+        with tempfile.TemporaryDirectory() as folder, patch.object(launcher, 'PORT_DIR', Path(folder)):
+            self.assertEqual(launcher.build_label(), 'v'+launcher.VERSION)
+            info=Path(folder)/'build-info.json'
+            info.write_text(json.dumps({'commit':'a'*40, 'package_version':'2.3.0.r400-1'}))
+            self.assertEqual(launcher.build_label(), 'v'+launcher.VERSION+' · Arch '+'a'*12)
+            info.write_text('broken json')
+            self.assertEqual(launcher.build_label(), 'v'+launcher.VERSION)
+
     def test_only_native_release_workflow_is_enabled(self):
         workflows = list((ROOT / '.github/workflows').glob('*.yml'))
         self.assertEqual([p.name for p in workflows], ['archlinux.yml'])
