@@ -347,6 +347,17 @@ void GameTab() {
     if (BeginRows("##controller")) {
         SliderRow("Vibration", s.vibration, 0, 100, "%d%%",
                   "Strength of the controller's vibration. 0% turns it off.");
+        SliderRow("Mouse prompt distance", s.mouse_prompt_distance, 16, 200, "%d px",
+                  "With Joystick prompts on Adaptive mouse: how far the mouse moves for one step of a rotation.");
+        static const char* const aim_styles[] = {"Relative", "Absolute"};
+        ChoiceRow("Right stick style", s.mouse_aim_style, aim_styles, nullptr, 2,
+                  "L2 aim with the mouse (Head of Helios, Bow of Apollo). Relative: the stick follows the "
+                  "movement and goes back to neutral when the mouse stops. Absolute: the stick points from "
+                  "where the mouse was when L2 was pressed to where it is.");
+        SliderRow("Right stick sensitivity", s.mouse_aim_sensitivity, 10, 200, "%d%%",
+                  "L2 aim with the mouse: lower needs more mouse movement for the same stick, higher less.");
+        CheckRow("Keep mouse in window", s.mouse_lock,
+                 "While you play, the mouse stays in the game window; this menu and other windows get it back.");
         ImGui::EndTable();
     }
 
@@ -446,7 +457,7 @@ void PerformanceTab() {
     auto& s = Gow3Settings::Get();
     ImGui::SeparatorText("Live");
     if (BeginRows("##live")) {
-        static const char* const fps_labels[] = {"30", "60", "120", "240", "Unlimited"};
+        static const char* const fps_labels[] = {"30", "60", "100", "120", "240", "Unlimited"};
         ChoiceRow("Frame rate limit", s.fps_limit, fps_labels, G::FpsLimits.data(), int(G::FpsLimits.size()),
                   "Caps the frame rate. The engine frame rate (below) is the highest it can go.");
         const int effective = G::EffectiveFps(s.fps_limit, s.applied_engine_fps);
@@ -471,11 +482,16 @@ void PerformanceTab() {
         // The same labels as the launcher (graphics_options.resolution_label): name, exact size, aspect ratio.
         static const char* const builtin_labels[] = {
             "Native · 1920 × 1080 · 16:9", "480p · 854 × 480 · 16:9",
-            "720p · 1280 × 720 · 16:9", "1440p · 2560 × 1440 · 16:9",
+            "720p · 1280 × 720 · 16:9", "900p · 1600 × 900 · 16:9",
+            "1440p · 2560 × 1440 · 16:9",
             "1800p · 3200 × 1800 · 16:9", "4K · 3840 × 2160 · 16:9",
             "2560 × 1080 · 21:9 (beta)", "3440 × 1440 · 21:9 (beta)",
             "3840 × 1600 · 21:9 (beta)", "5120 × 1440 · 32:9 (beta)",
-            "1920 × 1200 · 16:10 (beta)", "2560 × 1600 · 16:10 (beta)"};
+            "1920 × 1200 · 16:10 (beta)", "2560 × 1600 · 16:10 (beta)",
+            "1280 × 800 · 16:10", "1440 × 900 · 16:10",
+            "1360 × 768 · 16:9",
+            "1280 × 960 · 4:3", "1440 × 1080 · 4:3 (beta)", "1920 × 1440 · 4:3 (beta)",
+            "2048 × 1536 · 4:3 (beta)", "2560 × 1920 · 4:3 (beta)", "5120 × 2160 · 21:9 (beta)"};
         static_assert(std::size(builtin_labels) == G::Resolutions.size());
         const std::vector<std::string> resolution_names = G::ResolutionNames();
         std::vector<const char*> resolution_labels;
@@ -484,7 +500,7 @@ void PerformanceTab() {
         }
         ChoiceRow("Render resolution", s.render_resolution, resolution_labels.data(), nullptr,
                   int(resolution_labels.size()), "The resolution the game draws at. Higher is sharper and slower.");
-        static const char* const engine_labels[] = {"60 (original)", "120", "240"};
+        static const char* const engine_labels[] = {"60 (original)", "100", "120", "240"};
         ChoiceRow("Engine frame rate", s.engine_fps, engine_labels, G::EngineFps.data(), int(G::EngineFps.size()),
                   "The highest frame rate the game itself runs at.");
         CheckRow("Game reads GPU data without waiting", s.stale_readback,

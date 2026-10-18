@@ -16,25 +16,17 @@ class FontFileTest(unittest.TestCase):
         self.assertEqual(launcher.FONT_FILE, launcher.PORT_DIR / 'launcher' / 'Cinzel-Black.ttf')
         self.assertTrue(launcher.FONT_FILE.is_file())
 
-    def test_windows_package_ships_the_font(self):
-        script = (ROOT / 'packaging' / 'windows' / 'package.sh').read_text(encoding='utf-8')
-        copies = [line for line in script.splitlines()
-                  if 'launcher/Cinzel-Black.ttf' in line and '"$dest/launcher/"' in line]
-        self.assertTrue(copies, 'package.sh must copy launcher/Cinzel-Black.ttf into $dest/launcher/')
+    def test_native_package_ships_the_font(self):
+        recipe = (ROOT / 'packaging/arch/PKGBUILD').read_text(encoding='utf-8')
+        self.assertIn('cp -a launcher scripts patches "$dest/"', recipe)
+        self.assertTrue((ROOT / 'launcher/Cinzel-Black.ttf').is_file())
 
-    def test_packages_ship_the_font_license(self):
-        # SIL OFL 1.1: the license text travels with the font.
-        self.assertTrue((ROOT / 'launcher' / 'OFL-Cinzel.txt').is_file())
-        for script, dest in (('windows/package.sh', '"$dest/launcher/"'), ('linux/build.sh', '$share/launcher/')):
-            text = (ROOT / 'packaging' / script).read_text(encoding='utf-8')
-            self.assertTrue([line for line in text.splitlines() if 'launcher/OFL-Cinzel.txt' in line and dest in line], script)
-
-
-    def test_linux_package_ships_the_font(self):
-        script = (ROOT / 'packaging' / 'linux' / 'build.sh').read_text(encoding='utf-8')
-        copies = [line for line in script.splitlines()
-                  if 'launcher/Cinzel-Black.ttf' in line and '$share/launcher/' in line]
-        self.assertTrue(copies, 'build.sh must copy launcher/Cinzel-Black.ttf into $share/launcher/')
+    def test_native_package_ships_the_font_license(self):
+        self.assertTrue((ROOT / 'launcher/OFL-Cinzel.txt').is_file())
+        recipe = (ROOT / 'packaging/arch/PKGBUILD').read_text(encoding='utf-8')
+        self.assertIn('launcher/OFL-Cinzel.txt', recipe)
+        self.assertIn('/usr/share/licenses/gow3/OFL-Cinzel.txt', recipe)
+        self.assertIn("'OFL-1.1'", recipe)
 
 
 class RegisterFontTest(unittest.TestCase):

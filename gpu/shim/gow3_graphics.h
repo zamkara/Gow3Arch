@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Gow3Graphics {
@@ -20,13 +21,17 @@ inline constexpr std::array<const char*, DisplayModeCount> DisplayModeNames = {
     "Windowed", "Borderless", "Fullscreen"};
 
 /// Present rate limits; 0 = unlimited.
-inline constexpr std::array<int, 5> FpsLimits = {30, 60, 120, 240, 0};
+inline constexpr std::array<int, 6> FpsLimits = {30, 60, 100, 120, 240, 0};
 
 /// Game patch suffixes ("Resolution Patch - <name>"); "native" is no resolution patch.
-/// The last six are the Ultrawide mod's sizes (#202), built in as beta (scripts/graphics_options.py).
-inline constexpr std::array<std::string_view, 12> Resolutions = {
-    "native", "480p", "720p", "1440p", "1800p", "4K",
-    "2560x1080", "3440x1440", "3840x1600", "5120x1440", "1920x1200", "2560x1600"};
+/// The ones after 900p are the Ultrawide mod's sizes (#202) and the 16:10 and 4:3 ones, built in as beta
+/// (scripts/graphics_options.py).
+inline constexpr std::array<std::string_view, 22> Resolutions = {
+    "native", "480p", "720p", "900p", "1440p", "1800p", "4K",
+    "2560x1080", "3440x1440", "3840x1600", "5120x1440", "1920x1200", "2560x1600", "1280x800",
+    "1440x900", "1360x768",
+    "1280x960", "1440x1080", "1920x1440", "2048x1536", "2560x1920",
+    "5120x2160"};
 /// The resolutions to choose from: the built-in ones, then those of the enabled mods' patch files
 /// (GOW3_EXTRA_RESOLUTIONS, ";"-separated sizes such as "3440x1440"; run.py sets it at every start).
 inline std::vector<std::string> ResolutionNames() {
@@ -40,8 +45,25 @@ inline std::vector<std::string> ResolutionNames() {
     }
     return names;
 }
-/// Engine frame rate ceilings: 60 is the game's own, 120 and 240 are frame rate patches.
-inline constexpr std::array<int, 3> EngineFps = {60, 120, 240};
+/// The size in pixels of a resolution name: the built-in ones (as scripts/graphics_options.py SIZES)
+/// or a mod's "<width>x<height>"; anything else is native.
+inline constexpr std::array<std::pair<std::string_view, std::pair<int, int>>, 7> ResolutionSizes = {{
+    {"native", {1920, 1080}}, {"480p", {854, 480}}, {"720p", {1280, 720}},
+    {"900p", {1600, 900}}, {"1440p", {2560, 1440}}, {"1800p", {3200, 1800}}, {"4K", {3840, 2160}}}};
+inline std::pair<int, int> ResolutionSize(std::string_view name) {
+    for (const auto& [key, size] : ResolutionSizes) {
+        if (key == name) return size;
+    }
+    const std::size_t x = name.find('x');
+    if (x != std::string_view::npos) {
+        const int w = std::atoi(std::string(name.substr(0, x)).c_str());
+        const int h = std::atoi(std::string(name.substr(x + 1)).c_str());
+        if (w > 0 && h > 0) return {w, h};
+    }
+    return ResolutionSizes[0].second;
+}
+/// Engine frame rate ceilings: 60 is the game's own, 100 (for 100 Hz displays), 120 and 240 are frame rate patches.
+inline constexpr std::array<int, 4> EngineFps = {60, 100, 120, 240};
 
 template <typename T, std::size_t N>
 constexpr int IndexOf(const std::array<T, N>& values, const T& value, int fallback) {
