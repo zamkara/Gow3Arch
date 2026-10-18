@@ -19,7 +19,7 @@ class GraphicsOptionsTest(unittest.TestCase):
 
     def test_defaults_and_invalid_values(self):
         self.ini.write_text(
-            'render_resolution=8K\nengine_fps=90\nstale_readback=yes\n',
+            'render_resolution=invalid\nengine_fps=90\nstale_readback=yes\n',
             encoding='utf-8',
         )
         options, reverted = g.prepare(self.ini, self.state)
@@ -57,6 +57,16 @@ class GraphicsOptionsTest(unittest.TestCase):
         self.assertFalse(reverted)
         self.assertEqual(options['render_resolution'], '1440p')
         self.assertEqual(options['engine_fps'], '240')
+
+    def test_8k_selection_replaces_previous_resolution(self):
+        options = g.startup_options({'render_resolution': '8K'})
+        self.assertEqual(options['render_resolution'], '8K')
+        self.assertEqual(g.SIZES['8K'], (7680, 4320))
+        self.assertEqual(g.resolution_label('8K'), '8K · 7680 × 4320 · 16:9 (beta)')
+        names = g.patch_names(['Resolution Patch - 4K', g.TEXTURE_FIX], options)
+        self.assertEqual([n for n in names if n.startswith(g.RESOLUTION_PREFIX)],
+                         ['Resolution Patch - 8K'])
+        self.assertNotIn(g.TEXTURE_FIX, names)
 
     def test_write_keys_keeps_other_lines(self):
         self.ini.write_text(
@@ -134,6 +144,8 @@ class GraphicsOptionsTest(unittest.TestCase):
             ],
         )
 
+        # The engine rate changes live (in-game menu, R3 + L1 + R1): every launch takes the
+        # highest frame rate patch, even for 60 or 100 FPS.
         native = g.startup_options({'engine_fps': '60'})
         self.assertEqual(
             g.patch_names(
@@ -143,8 +155,10 @@ class GraphicsOptionsTest(unittest.TestCase):
             [
                 'Bug Fix - Texture Corruption Fix',
                 'Skip Any Video With X Button',
+                'Frame Rate Patch - 240 FPS',
             ],
         )
+        self.assertEqual(g.startup_options({'engine_fps': '100'})['engine_fps'], '100')
 
     def test_resolution_labels_show_the_size_and_aspect_ratio(self):
         self.assertEqual(g.resolution_label('native'), 'Native · 1920 × 1080 · 16:9')
@@ -185,7 +199,8 @@ class GraphicsOptionsTest(unittest.TestCase):
         self.assertEqual(g.startup_options(ini)['render_resolution'], 'native')
         options = g.startup_options(ini, ['3840x1080'])
         self.assertEqual(options['render_resolution'], '3840x1080')
-        self.assertEqual(g.patch_names(['Bug Fix - Texture Corruption Fix'], options), ['Resolution Patch - 3840x1080'])
+        self.assertEqual(g.patch_names(['Bug Fix - Texture Corruption Fix'], options),
+                         ['Resolution Patch - 3840x1080', 'Frame Rate Patch - 240 FPS'])
 
     def test_a_confirmed_mod_resolution_is_restored_while_its_mod_is_on(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -203,8 +218,9 @@ class GraphicsOptionsTest(unittest.TestCase):
         self.assertIn(100, g.ENGINE_FPS)
         options = g.startup_options({'render_resolution': 'native', 'engine_fps': '100'})
         self.assertEqual(options['engine_fps'], '100')
+        # 100 is written live over the 240 FPS patch (gow3_settings.cpp SyncEngineFps).
         self.assertEqual(g.patch_names(['Bug Fix - Texture Corruption Fix'], options),
-                         ['Bug Fix - Texture Corruption Fix', 'Frame Rate Patch - 100 FPS'])
+                         ['Bug Fix - Texture Corruption Fix', 'Frame Rate Patch - 240 FPS'])
         self.assertEqual(g.startup_options({'engine_fps': '90'})['engine_fps'], '120')  # not a choice: the default
 
     def test_applied_engine_fps(self):
@@ -266,7 +282,7 @@ class AspectRatioTest(unittest.TestCase):
 
     def test_resolutions_of_an_aspect_smallest_first_native_on_top(self):
         self.assertEqual(g.resolutions_for('16:9', g.RESOLUTIONS),
-                         ['native', '480p', '720p', '1360x768', '900p', '1440p', '1800p', '4K'])
+                         ['native', '480p', '720p', '1360x768', '900p', '1440p', '1800p', '4K', '8K'])
         self.assertEqual(g.resolutions_for('16:10', g.RESOLUTIONS), ['1280x800', '1440x900', '1920x1200', '2560x1600'])
         self.assertEqual(g.resolutions_for('4:3', g.RESOLUTIONS),
                          ['1280x960', '1440x1080', '1920x1440', '2048x1536', '2560x1920'])

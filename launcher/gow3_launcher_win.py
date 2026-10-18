@@ -13,6 +13,7 @@ so a packaged port needs no Python installation.
 """
 import contextlib
 import glob
+import importlib.util
 import json
 import math
 import os
@@ -60,7 +61,7 @@ NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 NEW_GROUP = {} if WINDOWS else {'start_new_session': True}
 UI_FONT, MONO_FONT, SERIF_FONT = 'Segoe UI', 'Consolas', 'Georgia'
 # This build; GitHub release tags are windows-v<VERSION>.
-VERSION = '2.4.1'
+VERSION = '2.5.0'
 RELEASES_API = 'https://api.github.com/repos/FelipePrado0/gow3_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/FelipePrado0/gow3_pc/releases/latest'
 def build_label():
@@ -105,6 +106,29 @@ def attach_stdio():
         setattr(sys, name, stream or open(os.devnull, 'w'))
 
 
+def load_mods():
+    """Use the disk loader in every role; PyInstaller's importer otherwise wins over sys.path.
+    Adapted from Kristian Andreev's PR #234."""
+    path = PORT_DIR / 'scripts' / 'mods.py'
+    if not FROZEN or not path.is_file():
+        return importlib.import_module('mods')
+    previous = sys.modules.get('mods')
+    if previous and getattr(previous, '__file__', None) == str(path):
+        return previous
+    spec = importlib.util.spec_from_file_location('mods', path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules['mods'] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        if previous is None:
+            sys.modules.pop('mods', None)
+        else:
+            sys.modules['mods'] = previous
+        raise RuntimeError('Could not load scripts/mods.py. Reinstall the complete port update.') from None
+    return module
+
+
 def run_role(argv):
     """--run [args]: run.py; --script <file> [args]: a preparation script. Returns an exit code."""
     attach_stdio()
@@ -118,6 +142,12 @@ def run_role(argv):
     else:
         path = str(PORT_DIR / 'run.py')
         sys.argv = [path, *argv[1:]]
+    if argv[0] == '--run':
+        try:
+            load_mods()
+        except RuntimeError as error:
+            print(str(error), file=sys.stderr, flush=True)
+            return 1
     try:
         runpy.run_path(path, run_name='__main__')
     except SystemExit as stop:
@@ -1419,7 +1449,7 @@ class Launcher:
             return []
         root = Path(self.var('mods_dir', 'app').get() or DATA_DIR / 'mods')
         names = ([n for n in self.mod_order if self.mod_vars.get(n) is None or self.mod_vars[n].get()]
-                 if getattr(self, 'mod_vars', None) else selected(root, DATA_DIR / 'mods.json'))
+                 if getattr(self, 'mod_vars', None) else selected(root, DATA_DIR / 'mods.json', self.var('game_dir', 'app').get()))
         files = [f for n in names for f in patch_files(root / n)]
         return [(size, (graphics_options.resolution_label(size) + ' (mod)',)) for size in resolution_names(files)
                 if size not in graphics_options.RESOLUTIONS]
@@ -1754,7 +1784,7 @@ class Launcher:
         self.row(f, _('Frames queued'), self.choice(f, 'frames_queued', 'ini', FRAMES_QUEUED),
                  _('1 is the lowest input latency; more can raise FPS when the graphics card is the limit.'))
         self.row(f, _('Engine frame rate'), self.choice(f, 'engine_fps', 'ini', ENGINE_FPS_CHOICES),
-                 _('The highest frame rate the game itself runs at (a game patch).'), restart=True)
+                 _('The highest frame rate the game itself runs at (a game patch).'))
         self.row(f, _('Aspect ratio'), self.choice(f, None, None, self.aspect_options, var=self.aspect_var()),
                  _('Shows the render resolutions of this shape only.'))
         self.row(f, _('Render resolution'), self.choice(f, 'render_resolution', 'ini', self.aspect_resolution_options),
@@ -2424,7 +2454,8 @@ class Launcher:
                 widget.destroy()
         root = Path(self.var('mods_dir', 'app').get() or DATA_DIR / 'mods')
         profile = load_json(DATA_DIR / 'mods.json', {})
-        available = discover(root)
+        game = self.var('game_dir', 'app').get()
+        available = discover(root, game)
         if set(self.mod_order) != set(available):
             known = [n for n in profile.get('order', []) if n in available]
             self.mod_order = known + [n for n in available if n not in known]
@@ -2447,7 +2478,7 @@ class Launcher:
                             command=self.refresh_conflicts).pack(side='left')
             tk.Label(line, text=str(index + 1), bg=bg, fg=MUTED, font=self.font(UI_FONT, 9), width=2, anchor='e').pack(
                 side='left', padx=self.px((4, 10)))
-            label = tk.Label(line, text=mod_info(root / name)['name'], bg=bg, anchor='w', cursor='hand2',
+            label = tk.Label(line, text=mod_info(root / name, game)['name'], bg=bg, anchor='w', cursor='hand2',
                              font=self.font(UI_FONT, 10, *(('bold',) if chosen else ())))
             label.pack(side='left', fill='x', expand=True)
             for widget in (line, label):
@@ -2494,7 +2525,7 @@ class Launcher:
             return
         root = Path(self.var('mods_dir', 'app').get() or DATA_DIR / 'mods')
         active = [n for n in self.mod_order if self.mod_vars[n].get()]
-        found = conflicts(root, active)
+        found = conflicts(root, active, self.var('game_dir', 'app').get())
         self.mod_conflicts = found
         self.mods_count.configure(text=_('{} of {} active', 'активно {} из {}').format(len(active), len(self.mod_order)) if self.mod_order else '')
         involved = {name for _path, owners in found for name in owners}
@@ -2537,7 +2568,8 @@ class Launcher:
             widget.destroy()
         name = self.selected_mod
         root = Path(self.var('mods_dir', 'app').get() or DATA_DIR / 'mods')
-        info = mod_info(root / name) if name else None
+        game = self.var('game_dir', 'app').get()
+        info = mod_info(root / name, game) if name else None
         if not info or not any(info[k] for k in ('image', 'description', 'author', 'version', 'url')):
             self.mod_details_shown = False
             self.place_mod_details()
@@ -2556,7 +2588,7 @@ class Launcher:
             tk.Label(panel, text=info['description'], bg=CARD, fg=TEXT, font=self.font(UI_FONT, 10), wraplength=width,
                      justify='left').pack(anchor='w', pady=self.px((10, 0)))
         try:
-            count = sum(1 for _file in mod_files(root / name))
+            count = sum(1 for _file in mod_files(root / name, game))
         except (OSError, ValueError):
             count = 0
         facts = (_('1 file', '1 файл') if count == 1 else _('{} files', 'файлов: {}').format(count)) + ('  ·  ' + _('game patches', 'патчи игры') if patch_files(root / name) else '')
@@ -3307,6 +3339,12 @@ def main():
         for window in ('Toplevel', 'Dialog', 'TkFDialog', 'TkChooseDir'):  # dialogs: tk_messageBox, file pickers
             root.option_add(f'*{window}.cursor', ARROW)
     pick_fonts(font.families(root))
+    try:
+        load_mods()
+    except RuntimeError as error:
+        messagebox.showerror(APP_NAME, str(error), parent=root)
+        root.destroy()
+        return 1
     Launcher(root, tk, ttk, filedialog, messagebox)
     root.mainloop()
 

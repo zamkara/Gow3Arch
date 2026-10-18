@@ -188,7 +188,8 @@ def main():
     # (the launcher and the in-game menu list them; GOW3_EXTRA_RESOLUTIONS tells the game).
     mod_patch_files = mods.enabled_patch_files(env.get('GOW3_MODS_DIR', data / 'mods'),
                                                env.get('GOW3_MODS_CONFIG', data / 'mods.json'),
-                                               env.get('GOW3_MODS_ENABLED', '1') != '0')
+                                               env.get('GOW3_MODS_ENABLED', '1') != '0',
+                                               env.get('GOW3_GAME_DIR', PORT.parent / 'CUSA01623'))
     extra_resolutions = [s for s in patches.resolution_names(mod_patch_files) if s not in graphics_options.RESOLUTIONS]
     env['GOW3_EXTRA_RESOLUTIONS'] = ';'.join(extra_resolutions)
     derived.append('GOW3_EXTRA_RESOLUTIONS')
@@ -303,11 +304,12 @@ def main():
         if 'GOW3_VBLANK_HZ' not in env:
             env['GOW3_VBLANK_HZ'] = '60'
             derived.append('GOW3_VBLANK_HZ')
-        # Without the frame rate patch the engine steps 1/60 s per frame: the present thread must
-        # not flip faster (gow3_graphics.h PresentLimit), or the game speeds up.
+        # The highest engine rate this launch allows (the menu picks a lower one live). Without the
+        # frame rate patch the engine steps 1/60 s per frame: the present thread must not flip
+        # faster (gow3_graphics.h PresentLimit), or the game speeds up.
         env['GOW3_ENGINE_FPS'] = str(engine_fps)
         derived.append('GOW3_ENGINE_FPS')
-        print(f'Engine frame rate: {engine_fps} FPS'
+        print(f'Engine frame rate: {min(int(graphics["engine_fps"]), engine_fps)} FPS, live up to {engine_fps}'
               + ('' if engine_fps > 60 or graphics['engine_fps'] == '60' else
                  ' (the frame rate patch was not found in this eboot.bin)'), flush=True)
         glyph_args, glyph_style = glyph_mounts(env, probe, game, out)

@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 import queue
 import struct
 import sys
+import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -24,6 +27,42 @@ def sfo_bytes(**values):
 
 
 BASE_SFO = sfo_bytes(TITLE_ID='CUSA01623', APP_VER='01.00')
+
+
+class DiskModsTest(unittest.TestCase):
+    def test_frozen_launcher_uses_disk_loader_in_every_import(self):
+        with tempfile.TemporaryDirectory() as directory:
+            port = Path(directory)
+            (port / 'scripts').mkdir()
+            (port / 'scripts/mods.py').write_text('SOURCE = "disk"\n')
+            bundled = types.ModuleType('mods')
+            with mock.patch.object(launcher, 'FROZEN', True), mock.patch.object(launcher, 'PORT_DIR', port), \
+                    mock.patch.dict(sys.modules, {'mods': bundled}):
+                module = launcher.load_mods()
+                self.assertEqual(module.SOURCE, 'disk')
+                self.assertIs(sys.modules['mods'], module)
+                self.assertIs(launcher.load_mods(), module)
+
+    def test_missing_disk_loader_uses_the_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundled = types.ModuleType('mods')
+            with mock.patch.object(launcher, 'FROZEN', True), \
+                    mock.patch.object(launcher, 'PORT_DIR', Path(directory)), \
+                    mock.patch.dict(sys.modules, {'mods': bundled}):
+                self.assertIs(launcher.load_mods(), bundled)
+
+    def test_invalid_disk_loader_has_a_clear_error_and_keeps_the_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            port = Path(directory)
+            (port / 'scripts').mkdir()
+            (port / 'scripts/mods.py').write_text('raise ValueError("internal details")\n')
+            bundled = types.ModuleType('mods')
+            with mock.patch.object(launcher, 'FROZEN', True), mock.patch.object(launcher, 'PORT_DIR', port), \
+                    mock.patch.dict(sys.modules, {'mods': bundled}):
+                with self.assertRaisesRegex(RuntimeError, 'scripts/mods.py') as raised:
+                    launcher.load_mods()
+                self.assertNotIn('internal details', str(raised.exception))
+                self.assertIs(sys.modules['mods'], bundled)
 
 
 class ControlMapTest(unittest.TestCase):
@@ -692,9 +731,9 @@ class GpuChoiceTest(unittest.TestCase):
 
 class ReleaseVersionTest(unittest.TestCase):
     def test_god_of_war_release_is_newer_than_the_inherited_tags(self):
-        self.assertEqual(launcher.VERSION, '2.4.1')
+        self.assertEqual(launcher.VERSION, '2.5.0')
         self.assertGreater(launcher.version_tuple(launcher.VERSION), launcher.version_tuple('windows-v1.5'))
-        self.assertGreater(launcher.version_tuple('windows-v2.4.2'), launcher.version_tuple(launcher.VERSION))
+        self.assertGreater(launcher.version_tuple('windows-v2.5.1'), launcher.version_tuple(launcher.VERSION))
 
     def test_first_start_is_in_english(self):
         # The translations are partial; 'System' stays a choice in Advanced.
