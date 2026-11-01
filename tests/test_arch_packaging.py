@@ -100,15 +100,15 @@ class NativeIntegrationTests(unittest.TestCase):
     def test_steam_uses_native_wrapper_with_user_data_directory(self):
         sys.path.insert(0, str(ROOT / 'launcher'))
         sys.path.insert(0, str(ROOT / 'scripts'))
-        import gow3_launcher_win as launcher
-        with patch.dict(os.environ, {'GOW3_NATIVE_LAUNCHER': '/usr/bin/gow3'}):
+        import spartanport_launcher_win as launcher
+        with patch.dict(os.environ, {'SPARTAN_NATIVE_LAUNCHER': '/usr/bin/gow3'}):
             self.assertEqual(launcher.steam_launch_command(),
                              ('/usr/bin/gow3', '--play', str(launcher.DATA_DIR)))
 
     def test_launcher_identifies_native_build_and_handles_missing_metadata(self):
         sys.path.insert(0, str(ROOT / 'launcher'))
         sys.path.insert(0, str(ROOT / 'scripts'))
-        import gow3_launcher_win as launcher
+        import spartanport_launcher_win as launcher
         with tempfile.TemporaryDirectory() as folder, patch.object(launcher, 'PORT_DIR', Path(folder)):
             self.assertEqual(launcher.build_label(), 'v'+launcher.VERSION)
             info=Path(folder)/'build-info.json'
@@ -128,7 +128,7 @@ class NativeIntegrationTests(unittest.TestCase):
     def test_source_cache_does_not_collide_with_launcher(self):
         recipe = (ROOT / 'packaging/arch/PKGBUILD').read_text()
         self.assertIn('gow3-source::git+', recipe)
-        self.assertNotIn('"gow3::git+', recipe)
+        self.assertNotIn('"spartanport::git+', recipe)
 
     def test_native_wrapper_does_not_write_bytecode_to_system_directory(self):
         wrapper = (ROOT / 'packaging/arch/gow3').read_text()
@@ -149,25 +149,28 @@ class UpstreamSyncTests(unittest.TestCase):
                 return subprocess.run(['git','-C',str(where),*args],check=check,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             upstream.mkdir();git(upstream,'init','-b','main')
             git(upstream,'config','user.name','Test');git(upstream,'config','user.email','test@example.invalid')
-            for name,text in [('README.md','upstream original'),('README.es.md','original'),('README.pt-BR.md','original'),('.github/workflows/old.yml','old'),('packaging/base','original'),('docs/UPSTREAM.md','original'),('tests/test_arch_packaging.py','original'),('src/runtime.c','base')]:
+            for name,text in [('README.md','upstream original'),('README.es.md','original'),('README.pt-BR.md','original'),('.github/workflows/old.yml','old'),('packaging/arch/base','original'),('docs/UPSTREAM.md','original'),('tests/test_arch_packaging.py','original'),('src/runtime.c','base')]:
                 path=upstream/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text+'\n')
             git(upstream,'add','.');git(upstream,'commit','-m','base')
             subprocess.run(['git','clone',str(upstream),str(fork)],check=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             git(fork,'config','user.name','Test');git(fork,'config','user.email','test@example.invalid')
             (fork/'README.md').write_text('native Arch fork\n')
-            (fork/'packaging/base').write_text('native package\n')
+            (fork/'packaging/arch/base').write_text('native package\n')
+            (fork/'.github/workflows/old.yml').unlink()
             if conflict:(fork/'src/runtime.c').write_text('fork code\n')
             git(fork,'add','.');git(fork,'commit','-m','fork policy')
             before=git(fork,'rev-parse','HEAD').stdout.strip()
             (upstream/'README.md').write_text('new AppImage instructions\n')
-            (upstream/'packaging/base').write_text('Windows package\n')
+            (upstream/'packaging/arch/base').write_text('Windows package\n')
             (upstream/'.github/workflows/windows.yml').write_text('new upstream runner\n')
+            (upstream/'.github/workflows/old.yml').write_text('modified upstream workflow\n')
             (upstream/'src/runtime.c').write_text('fixed upstream code\n')
             git(upstream,'add','.');git(upstream,'commit','-m','upstream fixes')
             result=subprocess.run(['bash',str(ROOT/'packaging/arch/sync-upstream.sh'),str(upstream),'main'],cwd=fork,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             self.assertEqual((fork/'README.md').read_text(),'native Arch fork\n')
-            self.assertEqual((fork/'packaging/base').read_text(),'native package\n')
+            self.assertEqual((fork/'packaging/arch/base').read_text(),'native package\n')
             self.assertFalse((fork/'.github/workflows/windows.yml').exists())
+            self.assertFalse((fork/'.github/workflows/old.yml').exists())
             self.assertEqual(git(fork,'status','--porcelain').stdout,'')
             if conflict:
                 self.assertNotEqual(result.returncode,0,result.stdout)

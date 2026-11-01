@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// gow3: temporal upscaling of the HDR scene color (docs/upscaler.md). Off for God of War III
-// until its scene color, depth and camera constants are found (run.py). GOW3_UPSCALER=fsr3
+// spartanport: temporal upscaling of the HDR scene color (docs/upscaler.md). Off for SpartanPort
+// until its scene color, depth and camera constants are found (run.py). SPARTAN_UPSCALER=fsr3
 // runs FSR 3.1 (FireBurn/FSR-Vulkan, native Vulkan) on the scene color right before the
 // post-processing combine pass, with the scene depth and camera motion vectors, and writes the
 // result back so the game's own post, tonemap and UI continue unchanged (Native AA preset).
@@ -8,7 +8,7 @@
 // Guest targets stay at 1920x1080. Host scene targets use output/preset dimensions,
 // resized at frame boundaries. At 1080p HDR reconstruction precedes post; other outputs
 // reconstruct tonemapped scene proxies before output-size UI/display composition.
-// GOW3_RENDER_RES retains the older startup-patched guest-resolution path.
+// SPARTAN_RENDER_RES retains the older startup-patched guest-resolution path.
 
 #pragma once
 
@@ -21,7 +21,7 @@
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
-#include "video_core/renderer_vulkan/vk_dlss.h"
+#include "video_core/renderer_vulkan/vk_frame_generation.h"
 #include "video_core/renderer_vulkan/vk_fsr4.h"
 #include "video_core/texture_cache/image.h"
 
@@ -53,12 +53,11 @@ public:
     /// A draw into a full-size RGBA16F target with the scene depth: the scene color.
     void OnSceneColor(VideoCore::ImageId color);
 
-    /// A blended (transparent) draw into the scene color that is not a full-screen pass: the
+    /// A blended (transparent) draw into the scene color:
     /// first one of a frame snapshots the opaque scene for the reactive mask.
     void OnBlendedSceneDraw();
 
-    /// A full-screen pass into the scene color: after a snapshot, the reactive mask is taken
-    /// before it (the fog composite rewrites every pixel).
+    /// Captures the finished HDR transparencies before the LDR composite replaces scene_color.
     void OnSceneComposite();
 
     /// Before a compute dispatch: the post-processing combine shader triggers the upscale.
@@ -67,14 +66,15 @@ public:
     /// Start of a frame in the command stream (display pass).
     bool OnFrameStart();
     bool RasterScaling() const;
-    /// gow3: LOD bias for scene materials, log2(render / output) while a reduced scene is
+    /// spartanport: LOD bias for scene materials, log2(render / output) while a reduced scene is
     /// upscaled (0 at native size, for TAA and without an upscaler).
     [[nodiscard]] float SceneMipBias() const;
-    /// gow3: the state RedirectColor/RedirectDepth/RasterScaling depend on, for memoizing a
+    /// spartanport: the state RedirectColor/RedirectDepth/RasterScaling depend on, for memoizing a
     /// draw's render state (Rasterizer::BeginRendering).
     [[nodiscard]] u64 RedirectState() const noexcept {
-        return u64(ui_phase) | u64(display_redirect) << 1 | u64(done_this_frame) << 2 |
-               u64(ui_color.index) << 8 | u64(ui_depth.index) << 36;
+        return (u64(ui_phase) | u64(display_redirect) << 1 | u64(done_this_frame) << 2 |
+                u64(ui_color.index) << 8 | u64(ui_depth.index) << 36) ^
+               u64(frame_display) * 0x9E3779B97F4A7C15ull;
     }
 
 
@@ -91,6 +91,15 @@ public:
     void OnDraw(u64 vs_hash, VideoCore::ImageId color, VideoCore::ImageId depth,
                 bool native_viewport);
 
+    /// SpartanPort (no HDR scene color, no trigger compute): every draw, before it runs, with its
+    /// pixel shader. The draw after the full-screen composite (ldr_trigger_ps, docs/upscaler.md)
+    /// runs FSR on the composite's RGBA8 sRGB result, before any HUD is drawn into it.
+    void OnGraphicsDraw(u64 ps_hash, VideoCore::ImageId color);
+    /// Before the composite this frame: scene draws still take the jitter.
+    [[nodiscard]] bool SceneOpen() const noexcept {
+        return !done_this_frame && !ldr_pending;
+    }
+
     /// A pass's first color target: the last render-size RGBA8 target before the UI is the
     /// game's finished frame.
     void OnColorTarget(VideoCore::ImageId color);
@@ -105,14 +114,17 @@ public:
     /// `view` is the game's view of the image: redirected views mirror its format (sRGB) and,
     /// for sampling, its channel swizzle.
     bool RedirectColor(VideoCore::ImageId color, const VideoCore::ImageViewInfo& view,
-                       Target& target);
+                       Target& target, u64 shader, bool replaces_color, bool has_depth);
     bool RedirectDepth(VideoCore::ImageId depth, Target& target);
     /// A sampled image replaced by the upscaled frame (the display pass).
     bool RedirectSampled(VideoCore::ImageId image, const VideoCore::ImageViewInfo& info,
                          vk::ImageView& view, vk::ImageLayout& layout);
     /// Whether RedirectSampled would replace `image` (it may record a barrier then).
-    [[nodiscard]] bool RedirectsSampled(VideoCore::ImageId image) const {
-        return display_redirect && image == ui_color;
+    [[nodiscard]] bool RedirectsSampled(VideoCore::ImageId image) const;
+
+    /// spartanport: frame generation, fed after the upscale (RunScaled), asked by the presenter.
+    [[nodiscard]] FrameGeneration& GetFrameGeneration() noexcept {
+        return *frame_generation;
     }
 
     /// Presenter: the output-size display buffer standing in for the guest one at `address`.
@@ -124,7 +136,7 @@ public:
     bool DisplayOverride(VAddr address, Display& display);
 
 private:
-    /// gow3: views of guest images the upscaler reads, kept across frames: FSR 4 registers
+    /// spartanport: views of guest images the upscaler reads, kept across frames: FSR 4 registers
     /// images by view in a registry of eight (a new view per frame filled it at Native AA).
     vk::ImageView CachedView(const VideoCore::Image& image, vk::Format format,
                              vk::ImageAspectFlags aspect);
@@ -141,6 +153,11 @@ private:
 
     void Run();
     void RunScaled();
+    /// FSR 3 at 1:1 on an RGBA8 (sRGB) scene color, written back with a blit.
+    void RunLdr();
+    /// Stencil reactive mask into reactive_image (w x h): false when off or without stencil.
+    bool RecordStencilReactive(vk::CommandBuffer cmdbuf, VideoCore::Image& depth, vk::Format depth_format,
+                               u32 w, u32 h);
     void RunUiOnly(VideoCore::ImageId color, VideoCore::ImageId depth);
     void EnsureUiResources(u32 width, u32 height, vk::Format color, vk::Format depth);
     void PrepareUiDepth(VideoCore::ImageId depth);
@@ -164,17 +181,12 @@ private:
     void CreatePipelines();
     /// Records the reactive mask pass; false when there is no snapshot this frame.
     bool RecordReactive(vk::ImageView color_view);
-    /// FSR 4 is selected, possible in this session (not GOW3_RENDER_RES) and has not failed.
+    /// FSR 4 is selected, possible in this session (not SPARTAN_RENDER_RES) and has not failed.
     [[nodiscard]] bool UseFsr4() const;
-    /// gow3: DLSS selected and the bridge is ready (NVIDIA RTX, gow3_dlss.dll).
-    [[nodiscard]] bool UseDlss() const;
-    /// Records DLSS into `cmdbuf` (output in General). `hdr`: linear scene color input.
-    bool RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
-                    const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh, float frame_ms,
-                    bool hdr);
     /// Records FSR 4 into output_image; on a permanent failure FSR 3 takes over.
     bool RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,
-                    u32 w, u32 h, u32 ow, u32 oh, float frame_ms);
+                    u32 w, u32 h, u32 ow, u32 oh, float frame_ms,
+                    vk::Format ldr_format = vk::Format::eR8G8B8A8Unorm);
     void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth);
     /// Sharpness above 1 for FSR 3/4 (their RCAS stops at 1): one more RCAS pass over the target
     /// (output_image, or the 8-bit UI image with ldr) in General layout after the upscaler.
@@ -196,8 +208,13 @@ private:
     bool failed = false;
     u64 trigger_hash = 0x9a9cf8a9;
     VideoCore::ImageId scene_color{};
+    /// SpartanPort's composite pass (frame_20261024-233122_3.txt pass #73): its target is the scene
+    /// color before the HUD. SPARTAN_UPSCALER_LDR_TRIGGER overrides it (hex).
+    u64 ldr_trigger_ps = 0x0c20ededc9e7c40cull;
+    bool ldr_pending = false;
+    bool ldr_scaled = false; ///< this session's scaled frames come from the composite (RunScaled)
     bool done_this_frame = false;
-    u32 preset_file_frames = 0; ///< GOW3_PRESET_FILE polling
+    u32 preset_file_frames = 0; ///< SPARTAN_PRESET_FILE polling
     int applied_output = -1;
     bool snapshot_taken = false;
     bool opaque_valid = false;
@@ -216,7 +233,12 @@ private:
     VideoCore::ImageId ldr_target{};
     VideoCore::ImageId ui_color{}, ui_depth{};
     bool ui_phase = false;         ///< from the upscale to the next display pass
+    bool display_seeded = false;
+    bool sampled_ui = false;
     bool display_redirect = false; ///< the display pass of an upscaled frame
+    /// The display buffer this frame's display pass drew into the upscaled image: later passes
+    /// of the same frame (the water refraction) read and draw that image, not the guest one.
+    VAddr frame_display = 0;
     bool ui_read_barrier = false;
     VideoCore::UniqueImage ui_image;
     VideoCore::UniqueImage ui_depth_image;
@@ -243,6 +265,10 @@ private:
         vk::Format format{};
         u32 width = 0, height = 0;
         bool valid = false;
+        /// SpartanPort's display pass samples the frame in render-size coordinates: the port copies
+        /// the UI image itself and the game's copy draws land here instead.
+        VideoCore::UniqueImage scratch;
+        std::vector<MirrorView> scratch_views;
     };
     std::mutex display_mutex;
     std::unordered_map<VAddr, DisplayImage> displays;
@@ -251,8 +277,8 @@ private:
     bool resources_fsr4 = false;  ///< made for FSR 4 (no FSR 3 context)
     bool resources_taa = false;
     std::unique_ptr<Fsr4Upscaler> fsr4;
+    std::unique_ptr<FrameGeneration> frame_generation;
     bool fsr4_failed = false;
-    bool dlss_failed = false;
     VideoCore::UniqueImage motion_image;
     VideoCore::UniqueImage output_image;
     vk::UniqueImageView motion_view;
@@ -264,6 +290,9 @@ private:
     vk::UniqueDescriptorSetLayout reactive_desc_layout;
     vk::UniquePipelineLayout reactive_pipeline_layout;
     vk::UniquePipeline reactive_pipeline;
+    vk::UniqueDescriptorSetLayout stencil_reactive_desc_layout;
+    vk::UniquePipelineLayout stencil_reactive_pipeline_layout;
+    vk::UniquePipeline stencil_reactive_pipeline;
     vk::UniqueDescriptorSetLayout merge_desc_layout;
     vk::UniquePipelineLayout merge_pipeline_layout;
     vk::UniquePipeline merge_pipeline;

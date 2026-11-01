@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "gow3_toggles.h"
+#include "spartanport_toggles.h"
 
 #include "video_core/host_shaders/camera_motion_comp.h"
 #include "video_core/host_shaders/camera_motion_debug_comp.h"
@@ -15,6 +15,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "video_core/renderer_vulkan/vk_view_projection.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace Vulkan {
@@ -51,11 +52,11 @@ std::array<float, 12> Multiply(const std::array<float, 12>& a, const std::array<
 CameraMotion::CameraMotion(const Instance& instance_, Scheduler& scheduler_,
                            VideoCore::TextureCache& texture_cache_, Runtime& runtime_)
     : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_}, runtime{runtime_} {
-    const char* env = std::getenv("GOW3_DEBUG_MOTION");
+    const char* env = std::getenv("SPARTAN_DEBUG_MOTION");
     debug_overlay = env && env[0] == '1';
-    const char* upscaler = std::getenv("GOW3_UPSCALER");
+    const char* upscaler = std::getenv("SPARTAN_UPSCALER");
     // The upscaler can be switched on from the menu at any time: the camera is always tracked
-    // unless GOW3_UPSCALER=none.
+    // unless SPARTAN_UPSCALER=none.
     for_upscaler = !(upscaler && std::strcmp(upscaler, "none") == 0);
     const auto device = instance.GetDevice();
     if (for_upscaler) {
@@ -244,6 +245,37 @@ void CameraMotion::OnGBufferPass(VideoCore::ImageId depth) {
     depth_id = depth;
 }
 
+void CameraMotion::OnViewProjection(const float* matrix, VideoCore::ImageId depth) {
+    if (frame_has_camera) {
+        return;
+    }
+    const auto camera = ViewProjection::Decompose(matrix);
+    if (!camera.valid) {
+        static int rejected = 0;
+        if (rejected < 4) {
+            ++rejected;
+            std::printf("Camera motion: depth pre-pass constants rejected: %g %g %g %g | %g %g %g %g\n",
+                        matrix[0], matrix[1], matrix[2], matrix[3], matrix[12], matrix[13],
+                        matrix[14], matrix[15]);
+        }
+        return;
+    }
+    previous = current;
+    current.view = camera.view;
+    current.inv_view = camera.inv_view;
+    current.proj = camera.proj;
+    current.valid = true;
+    depth_id = depth;
+    prepass_camera = true;
+    const auto& image = texture_cache.GetImage(depth);
+    const std::array<u32, 2> size{image.info.size.width, image.info.size.height};
+    if (size != render_size) {
+        std::printf("Camera motion: depth pre-pass camera, scene render size %ux%u\n", size[0], size[1]);
+        render_size = size;
+    }
+    frame_has_camera = true;
+}
+
 void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
     if (debug_overlay && frame && depth_id && current.valid && previous.valid) {
         Overlay(frame);
@@ -300,10 +332,10 @@ void CameraMotion::Overlay(VideoCore::ImageId frame) {
         .size = {float(color.info.size.width), float(color.info.size.height)},
         .jitter = jitter,
         .previous_jitter = previous_jitter,
-        .mode = Gow3Toggle::Disabled(1u << 20)   ? 1u
-                : Gow3Toggle::Disabled(1u << 21) ? 2u
-                : Gow3Toggle::Disabled(1u << 22) ? 3u
-                : Gow3Toggle::Disabled(1u << 23) ? 4u
+        .mode = SpartanToggle::Disabled(1u << 20)   ? 1u
+                : SpartanToggle::Disabled(1u << 21) ? 2u
+                : SpartanToggle::Disabled(1u << 22) ? 3u
+                : SpartanToggle::Disabled(1u << 23) ? 4u
                                                : 0u,
     };
     static u32 log_counter = 0;

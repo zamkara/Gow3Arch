@@ -50,7 +50,7 @@ int main() {
             home.mkdir()
             env = dict(os.environ)
             env.pop('XDG_DATA_HOME', None)
-            env.pop('GOW3_GPU_USER_DIR', None)
+            env.pop('SPARTAN_GPU_USER_DIR', None)
             env['HOME'] = str(home)
             if custom_xdg:
                 env['XDG_DATA_HOME'] = str(root / 'missing/parent/data')

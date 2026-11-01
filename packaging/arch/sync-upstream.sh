@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Merge upstream source without replacing this fork's distribution policy.
 set -euo pipefail
-upstream_url=${1:-https://github.com/FelipePrado0/gow3_pc.git}
+upstream_url=${1:-https://github.com/FelipePrado0/SpartanPort.git}
 upstream_branch=${2:-main}
 [[ -z $(git status --porcelain) ]] || { echo 'Upstream sync requires a clean checkout.' >&2; exit 1; }
 git fetch --no-tags "$upstream_url" "$upstream_branch"
@@ -11,7 +11,7 @@ if git merge-base --is-ancestor "$upstream_commit" HEAD; then
     exit 0
 fi
 # Save this fork's protected tree from before the merge, including upstream additions/deletions.
-protected=(.github packaging README.md README.es.md README.pt-BR.md docs/UPSTREAM.md tests/test_arch_packaging.py)
+protected=(.github packaging/arch README.md README.es.md README.pt-BR.md docs/UPSTREAM.md tests/test_arch_packaging.py)
 original=$(git rev-parse HEAD)
 merge_status=0
 git merge --no-ff --no-commit "$upstream_commit" || merge_status=$?
@@ -19,7 +19,10 @@ if (( merge_status > 1 )); then
     git merge --abort || true
     exit "$merge_status"
 fi
-git restore --source="$original" --staged --worktree -- "${protected[@]}"
+# Resolve deleted protected files as well as content conflicts before restoring.
+git rm -r -f --ignore-unmatch -- "${protected[@]}" >/dev/null
+git ls-tree -r --name-only -z "$original" -- "${protected[@]}" |
+    git restore --source="$original" --staged --worktree --pathspec-from-file=- --pathspec-file-nul
 if [[ -n $(git ls-files --unmerged) ]]; then
     echo 'Source conflicts require review; no upstream changes will be pushed.' >&2
     git diff --name-only --diff-filter=U >&2

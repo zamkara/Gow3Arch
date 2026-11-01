@@ -476,3 +476,17 @@ Also used: [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9), [FFmpeg](htt
 ## License
 
 GNU GPL v2 or later ([LICENSE](https://github.com/FelipePrado0/gow3_pc/blob/main/LICENSE)). Third-party components keep their own licenses.
+
+## SpartanPort upstream synchronization
+
+The reviewed merge of upstream `a2299cd59bc363fb9d0dbfe11cac26c2a49e5aaa`
+updates runtime binaries and Python modules to the SpartanPort names. The native
+package remains `gow3`, starts the packaged Python launcher through `/usr/bin/gow3`,
+and retains its existing user data directory. Native overlay cadence and explicit
+pipeline-binary opt-in are preserved under the renamed settings and environment.
+
+Future merges protect `.github`, `packaging/arch`, native documentation and the
+Arch packaging regression tests. Other upstream packaging support files can
+update normally. Protected modify/delete conflicts are removed from the index
+before the original fork tree is restored; unresolved source conflicts still
+abort the merge without pushing.

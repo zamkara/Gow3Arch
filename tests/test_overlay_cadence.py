@@ -12,28 +12,28 @@ CXX = shutil.which('c++') or shutil.which('clang++')
 @unittest.skipUnless(CXX, 'A C++ compiler is required')
 class OverlayCadenceTests(unittest.TestCase):
     def test_displayed_fps_and_frametime_stay_fixed_until_interval_expires(self):
-        source = (ROOT/'gpu/shim/gow3_overlay.cpp').read_text()
+        source = (ROOT/'gpu/shim/spartanport_overlay.cpp').read_text()
         start = source.index('std::string OverlayText() {')
         end = source.index('\n}\n', start)+2
         # Keep production logic; replace only the clock read so no real sleep is needed.
         formatter = source[start:end].replace('P::RefreshTimer::Clock::now()', 'fake_now')
-        program = '''#include "gow3_perf_stats.h"
-#include "gow3_settings.h"
+        program = '''#include "spartanport_perf_stats.h"
+#include "spartanport_settings.h"
 #include <cassert>
 #include <cstdio>
-namespace Gow3Settings { Values& Get() { static Values values; return values; } }
-namespace Gow3PerfStats {
+namespace SpartanSettings { Values& Get() { static Values values; return values; } }
+namespace SpartanPerfStats {
 Sample Latest() { return {}; }
 void Start(const Vulkan::Instance&) {}
 }
 float frame_ms_avg = 10.0f;
 const Vulkan::Instance* overlay_instance = nullptr;
 const char* UpscalerLabel(int) { return "Native"; }
-Gow3PerfStats::RefreshTimer::Clock::time_point fake_now{};
+SpartanPerfStats::RefreshTimer::Clock::time_point fake_now{};
 ''' + formatter + '''
 int main() {
     using namespace std::chrono;
-    auto& settings = Gow3Settings::Get();
+    auto& settings = SpartanSettings::Get();
     const auto start = fake_now;
     const auto first = OverlayText();
     assert(first.find("100 FPS") != std::string::npos);

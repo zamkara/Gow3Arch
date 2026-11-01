@@ -1,13 +1,13 @@
-#ifndef GOW3_RUNTIME_H
-#define GOW3_RUNTIME_H
+#ifndef SPARTAN_RUNTIME_H
+#define SPARTAN_RUNTIME_H
 #include <stdint.h>
 #include <stddef.h>
 #ifdef _WIN32
 #include "compat_win.h"
-/* No signals on Windows: the exception handler resumes the thread in gow3_longjmp
- * (gpu/shim/gow3_toggles.h uses the same buffer type). */
-typedef gow3_jmp_buf sigjmp_buf;
-#define sigsetjmp(buffer, save) gow3_setjmp(buffer)
+/* No signals on Windows: the exception handler resumes the thread in spartanport_longjmp
+ * (gpu/shim/spartanport_toggles.h uses the same buffer type). */
+typedef spartanport_jmp_buf sigjmp_buf;
+#define sigsetjmp(buffer, save) spartanport_setjmp(buffer)
 #else
 #include <setjmp.h>
 #endif
@@ -15,6 +15,12 @@ typedef gow3_jmp_buf sigjmp_buf;
 extern __thread sigjmp_buf *runtime_fault_recover;
 /* Restarts the game (in-game settings menu, render resolution change). */
 void runtime_restart(void);
+/* SPARTAN_SLOW_WAITS=<ms>: log guest blocking calls (locks, waits, reads) longer than that.
+ * runtime_wait_begin() returns 0 when it is off; runtime_wait_end() then does nothing. */
+uint64_t runtime_wait_begin(void);
+void runtime_wait_end(const char *what,uint64_t start,const char *detail,long long arg);
+/* The floating-point state a PS4 gives its threads (runtime_thread.c). */
+void runtime_orbis_fpu(void);
 #define ABI __attribute__((sysv_abi))
 typedef void (ABI *GuestCallback)(void);
 void runtime_start(uint64_t capabilities);
@@ -37,6 +43,8 @@ void runtime_set_procparam(void *param);
 void **runtime_application_heap_api(void);
 uintptr_t runtime_thread_resolve(const char *name);
 void runtime_thread_report(void);
+/* Counts a guest sched_yield (zero_sleep 0) or a zero-length sleep (1) for the report (#209). */
+void runtime_thread_count_yield(int zero_sleep);
 void runtime_set_main_tls(const void *data, uint64_t filesz, uint64_t memsz, uint64_t align);
 void runtime_thread_attach_main(void);
 int32_t *runtime_errno(void);
@@ -60,6 +68,8 @@ int runtime_file_mount(const char *guest, const char *host);
 void runtime_file_unmount(const char *guest);
 int runtime_file_translate(const char *guest, char *out, size_t size);
 int64_t runtime_file_open(const char *path, int flags, int mode);
+/* 1 while the last area WAD the game opened is a Cronos one (Crn*.WAD). */
+int runtime_file_cronos(void);
 int64_t runtime_file_close(int fd);
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size);
 int64_t runtime_file_pread(int fd, void *buffer, uint64_t size, int64_t offset);
@@ -72,6 +82,9 @@ void runtime_thread_keys_cleanup(void);
 /* Guest-visible errno values are FreeBSD's. */
 int32_t runtime_guest_errno(int host_errno);
 void *runtime_low_map(size_t size, int prot);
+/* Zeroed, 64-byte aligned host records the guest sees by address, below 1 TiB (SPARTAN_LOW_HANDLES). */
+void *runtime_low_alloc(size_t size);
+void runtime_low_free(void *pointer);
 /* Windows: reserves the PS4 user address range as a placeholder (no-op elsewhere). */
 void runtime_memory_reserve(void);
 uintptr_t runtime_ajm_resolve(const char *name);
@@ -92,6 +105,8 @@ uintptr_t runtime_audio_resolve(const char *name);
 void runtime_audio_report(void);
 uintptr_t runtime_pad_resolve(const char *name);
 void runtime_pad_report(void);
+/* Kratos' object, stored by the player hook (src/player_hook.h); 0 until he first moves. */
+extern uintptr_t runtime_player_object;
 /* probe --gamepad: prints one "Gamepad:" line for the first pad found (returns 1) or none (0). */
 int runtime_pad_describe(void);
 uintptr_t runtime_rtc_resolve(const char *name);
@@ -103,5 +118,7 @@ void runtime_savedata_report(void);
 #define RUNTIME_SAVE_PARAM_SIZE 1328
 int runtime_savedata_param(int32_t user, const char *dir, void *param);
 int runtime_savedata_icon(int32_t user, const char *dir, char *out, size_t size);
+int64_t runtime_savedata_mtime(int32_t user, const char *dir);
+void runtime_savedata_preview_path(const char *path);
 void runtime_thread_attach_host(const char *name);
 #endif

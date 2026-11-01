@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "gow3_perf_stats.h"
+#include "spartanport_perf_stats.h"
 #include <cassert>
 #include <chrono>
 #include <cstdio>
 int main() {
     using namespace std::chrono;
-    using Gow3PerfStats::RefreshTimer;
+    using SpartanPerfStats::RefreshTimer;
     const RefreshTimer::Clock::time_point start{};
     RefreshTimer timer;
     assert(timer.Due(start, 1000));

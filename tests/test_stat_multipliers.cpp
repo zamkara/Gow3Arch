@@ -9,7 +9,7 @@
 #include <vector>
 #include "../src/damage_hook.h"
 #include "../src/orb_hook.h"
-#include "gow3_settings.h"
+#include "spartanport_settings.h"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -41,28 +41,30 @@ static uintptr_t Address(const void* p) {
     return reinterpret_cast<uintptr_t>(p);
 }
 
-// Runs the damage stub as the game would: r13 the actor, rbp the routine's frame. Returns the
-// health the game would compute (xmm0 at the resume point) and the damage left in the frame.
-static float Damage(bool player, float health, float damage, float taken, float dealt, float* frame_damage) {
+// Runs the damage stub as the game's routine entry would: rdi the actor, xmm0 the damage, rbp the
+// routine's frame. Returns the damage the routine goes on with (xmm0) and checks the replayed
+// instructions stored it in the frame and set r13.
+static float Damage(bool player, float damage, float taken, float dealt) {
     unsigned char* code = Executable();
-    const unsigned char entry[] = {0x55, 0x41,0x55, 0x49,0x89,0xfd, 0x48,0x89,0xf5, 0xff,0x25,0,0,0,0};
+    const unsigned char entry[] = {0x55, 0x41,0x55, 0x48,0x89,0xf5, 0xff,0x25,0,0,0,0};
     std::memcpy(code, entry, sizeof(entry));
     const uintptr_t stub = Address(code + 64), exit = Address(code + 512);
     std::memcpy(code + sizeof(entry), &stub, 8);
-    assert(gow3_damage_build_stub(code + 64, Address(&taken), Address(&dealt), exit) < 448);
-    const unsigned char leave[] = {0xc5,0xfa,0x11,0x45,0x98, 0x41,0x5d, 0x5d, 0xc3};
+    assert(spartanport_damage_build_stub(code + 64, Address(&taken), Address(&dealt), exit) < 448);
+    const unsigned char leave[] = {0x4c,0x89,0x2a, 0x41,0x5d, 0x5d, 0xc3};  // mov [rdx], r13
     std::memcpy(code + 512, leave, sizeof(leave));
     Seal(code);
     std::vector<unsigned char> actor(0x400);
     actor[0x298] = player ? 0 : 1;
     float frame[32]{};
     float* top = frame + 32;
-    std::memcpy(reinterpret_cast<unsigned char*>(top) - 0x5c, &health, 4);
-    std::memcpy(reinterpret_cast<unsigned char*>(top) - 0x60, &damage, 4);
-    reinterpret_cast<void(__attribute__((sysv_abi))*)(void*, void*)>(code)(actor.data(), top);
-    float result;
-    std::memcpy(&result, reinterpret_cast<unsigned char*>(top) - 0x68, 4);
-    std::memcpy(frame_damage, reinterpret_cast<unsigned char*>(top) - 0x60, 4);
+    void* r13 = nullptr;
+    const float result = reinterpret_cast<float(__attribute__((sysv_abi))*)(void*, void*, void**, float)>(code)(
+        actor.data(), top, &r13, damage);
+    float stored;
+    std::memcpy(&stored, reinterpret_cast<unsigned char*>(top) - 0x60, 4);
+    assert(r13 == actor.data());
+    assert(std::memcmp(&stored, &result, 4) == 0);
     return result;
 }
 
@@ -74,7 +76,7 @@ struct Amounts {
 // the prologue the stub replayed.
 static Amounts Pickup(Amounts in, float green, float blue, float gold) {
     unsigned char* code = Executable();
-    assert(gow3_orb_pickup_build_stub(code, Address(&green), Address(&blue), Address(&gold),
+    assert(spartanport_orb_pickup_build_stub(code, Address(&green), Address(&blue), Address(&gold),
                                       Address(code + 512)) < 512);
     const unsigned char leave[] = {0xc5,0xfa,0x11,0x07, 0xc5,0xfa,0x11,0x4f,0x04, 0xc5,0xfa,0x11,0x57,0x08,
                                    0x48,0x83,0xc4,0x18, 0x5b, 0x5d, 0xc3};
@@ -94,25 +96,24 @@ static std::string Read(const char* path) {
 }
 
 int main(int argc, char** argv) {
-    assert(gow3_damage_signature_match(gow3_damage_original, GOW3_DAMAGE_HOOK_LENGTH));
-    assert(!gow3_damage_signature_match(gow3_damage_original, GOW3_DAMAGE_HOOK_LENGTH - 1));
-    assert(gow3_orb_pickup_signature_match(gow3_orb_pickup_original, GOW3_ORB_PICKUP_LENGTH));
+    assert(spartanport_damage_signature_match(spartanport_damage_original, SPARTAN_DAMAGE_HOOK_LENGTH));
+    assert(!spartanport_damage_signature_match(spartanport_damage_original, SPARTAN_DAMAGE_HOOK_LENGTH - 1));
+    assert(spartanport_orb_pickup_signature_match(spartanport_orb_pickup_original, SPARTAN_ORB_PICKUP_LENGTH));
     if (argc > 1) {
         std::ifstream file(argv[1], std::ios::binary);
         std::vector<unsigned char> image((std::istreambuf_iterator<char>(file)), {});
-        assert(image.size() > 0x4000 + GOW3_ORB_PICKUP_OFFSET + GOW3_ORB_PICKUP_LENGTH);
-        assert(gow3_damage_signature_match(image.data() + 0x4000 + GOW3_DAMAGE_HOOK_OFFSET, GOW3_DAMAGE_HOOK_LENGTH));
-        assert(gow3_orb_pickup_signature_match(image.data() + 0x4000 + GOW3_ORB_PICKUP_OFFSET, GOW3_ORB_PICKUP_LENGTH));
+        assert(image.size() > 0x4000 + SPARTAN_ORB_PICKUP_OFFSET + SPARTAN_ORB_PICKUP_LENGTH);
+        assert(spartanport_damage_signature_match(image.data() + 0x4000 + SPARTAN_DAMAGE_HOOK_OFFSET, SPARTAN_DAMAGE_HOOK_LENGTH));
+        assert(spartanport_orb_pickup_signature_match(image.data() + 0x4000 + SPARTAN_ORB_PICKUP_OFFSET, SPARTAN_ORB_PICKUP_LENGTH));
     }
 
-    float left;
-    assert(Damage(true, 100, 10, 2, 5, &left) == 80 && left == 20);    // player: taken
-    assert(Damage(false, 100, 10, 2, 5, &left) == 50 && left == 50);   // enemy: dealt
-    assert(Damage(false, 100, 10, 0.5f, 0.1f, &left) == 99 && left == 1);
-    assert(Damage(true, 100, -10, 2, 5, &left) == 110 && left == -10); // healing stays
-    assert(Damage(true, 100, 0, 2, 5, &left) == 100 && left == 0);
+    assert(Damage(true, 10, 2, 5) == 20);       // player: taken
+    assert(Damage(false, 10, 2, 5) == 50);      // enemy: dealt, before the health thresholds
+    assert(Damage(false, 10, 0.5f, 0.1f) == 1);
+    assert(Damage(true, -10, 2, 5) == -10);     // healing stays
+    assert(Damage(false, 0, 2, 5) == 0);
     const float nan = std::numeric_limits<float>::quiet_NaN();
-    Damage(false, 100, nan, 2, 5, &left);
+    const float left = Damage(false, nan, 2, 5);
     assert(left != left);
 
     Amounts a = Pickup({10, 20, 30}, 2, 3, 0.5f);
@@ -127,16 +128,16 @@ int main(int argc, char** argv) {
                "blue_orb_multiplier=1000\ngold_orb_multiplier=0\n";
     }
 #ifdef _WIN32
-    _putenv_s("GOW3_CONFIG", path);
+    _putenv_s("SPARTAN_CONFIG", path);
 #else
-    setenv("GOW3_CONFIG", path, 1);
+    setenv("SPARTAN_CONFIG", path, 1);
 #endif
-    auto& v = Gow3Settings::Get();
-    Gow3Settings::Load();
+    auto& v = SpartanSettings::Get();
+    SpartanSettings::Load();
     assert(v.damage_dealt == 2.5f && v.damage_taken == 0.5f && v.green_orb_multiplier == 3.0f);
     assert(v.blue_orb_multiplier == 100.0f && v.gold_orb_multiplier == 0.1f);
     v.gold_orb_multiplier = 4.0f;
-    Gow3Settings::Save();
+    SpartanSettings::Save();
     const std::string saved = Read(path);
     for (const char* line : {"damage_dealt=2.500\n", "damage_taken=0.500\n", "green_orb_multiplier=3.000\n",
                              "blue_orb_multiplier=100.000\n", "gold_orb_multiplier=4.000\n"}) {

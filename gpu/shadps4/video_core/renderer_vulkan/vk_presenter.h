@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <deque>
 
 #include <condition_variable>
@@ -11,6 +12,7 @@
 #include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/frame_generation_policy.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
@@ -37,7 +39,10 @@ struct Frame {
     u64 ready_tick;
     bool is_hdr{false};
     u8 id{};
-    vk::Format format{}; ///< gow3: of `image` (screenshots)
+    vk::Format format{}; ///< spartanport: of `image` (screenshots)
+    /// spartanport: frame generation's frame, shown before this one (Present), or null.
+    Frame* generated = nullptr;
+    bool is_generated = false; ///< spartanport: a frame generation frame (screenshots say so)
 };
 
 enum SchedulerType {
@@ -99,7 +104,7 @@ public:
     Frame* PrepareBlankFrame(bool present_thread);
 
     void Present(Frame* frame, bool is_reusing_frame = false, bool is_game_frame = true);
-    /// gow3: a black frame with the loading screen (Gow3Overlay::SetLoading) only.
+    /// spartanport: a black frame with the loading screen (SpartanOverlay::SetLoading) only.
     void PresentLoadingFrame();
     Frame* PrepareLastFrame();
 
@@ -123,7 +128,7 @@ private:
     HostPasses::PostProcessingPass pp_pass;
     AmdGpu::Liverpool* liverpool;
     Scheduler draw_scheduler;
-    std::deque<u64> recent_frame_ticks; ///< gow3: GOW3_FRAMES_AHEAD bound (PrepareFrame)
+    std::deque<u64> recent_frame_ticks; ///< spartanport: SPARTAN_FRAMES_AHEAD bound (PrepareFrame)
     Scheduler present_scheduler;
     Scheduler flip_scheduler;
     Swapchain swapchain;
@@ -138,6 +143,8 @@ private:
     std::condition_variable free_cv;
     std::condition_variable_any frame_cv;
     std::vector<VAddr> vo_buffers_addr;
+    /// spartanport: frame generation pacing, the generated frame halfway between real ones.
+    FrameGenerationPolicy::Pacing frame_pacing;
 };
 
 } // namespace Vulkan

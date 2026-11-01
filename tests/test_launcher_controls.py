@@ -10,7 +10,7 @@ from unittest import mock
 
 from paths import ROOT
 sys.path.insert(0, str(ROOT / 'launcher'))
-import gow3_launcher_win as launcher  # noqa: E402
+import spartanport_launcher_win as launcher  # noqa: E402
 
 
 def sfo_bytes(**values):
@@ -66,6 +66,62 @@ class DiskModsTest(unittest.TestCase):
 
 
 class ControlMapTest(unittest.TestCase):
+    def test_stick_directions_are_saved_and_sent_like_other_keyboard_actions(self):
+        defaults = {row[0]: launcher.default_input(row, 'key') for row in launcher.table_rows('key')}
+        self.assertEqual({name: defaults.get(name) for name in
+                          ('move_up', 'move_down', 'move_left', 'move_right',
+                           'look_up', 'look_down', 'look_left', 'look_right')},
+                         dict(move_up='W', move_down='S', move_left='A', move_right='D',
+                              look_up='Up', look_down='Down', look_left='Left', look_right='Right'))
+        defaults.update(move_up='T', look_left='None')
+        changes = launcher.control_changes(defaults, 'key')
+        self.assertEqual(changes, {'move_up': 'T', 'look_left': 'None'})
+        spec = launcher.keyboard_map({'key': changes})
+        self.assertIn('move_up=T', spec)
+        self.assertIn('look_left=None', spec)
+
+    def test_new_directions_do_not_take_keys_from_saved_actions(self):
+        old = {'controls_layout': 3, 'controls': {'key': {'cross': 'W', 'dodge': 'Left'}}}
+        new = launcher.migrate_controls(old)
+        self.assertEqual(old['controls']['key'], {'cross': 'W', 'dodge': 'Left'})
+        self.assertEqual(new['controls']['key']['cross'], 'W')
+        self.assertEqual(new['controls']['key']['move_up'], 'None')
+        self.assertEqual(new['controls']['key']['look_left'], 'None')
+        self.assertEqual(launcher.migrate_controls(new), new)
+
+    def test_unbinding_several_inputs_does_not_swap_their_old_keys(self):
+        bindings = {'move_up': 'W', 'move_left': 'None', 'look_right': 'Right'}
+        self.assertIsNone(launcher.bind_key(bindings, 'move_up', 'None'))
+        self.assertIsNone(launcher.bind_key(bindings, 'look_right', 'None'))
+        self.assertEqual(set(bindings.values()), {'None'})
+
+    def test_direction_conflicts_swap_and_invalid_entries_are_not_forwarded(self):
+        bindings = {row[0]: launcher.default_input(row, 'key') for row in launcher.table_rows('key')}
+        self.assertEqual(launcher.bind_key(bindings, 'cross', 'W'), 'move_up')
+        self.assertEqual(bindings['move_up'], 'Space')
+        spec = launcher.keyboard_map({'key': launcher.control_changes(bindings, 'key')})
+        self.assertIn('move_up=Space', spec)
+        self.assertIn('cross=W', spec)
+        self.assertNotIn('move_up=', launcher.keyboard_map({'key': {'move_up': 'T,cross=H'}}))
+
+
+    def test_shader_notes_are_off_without_a_saved_choice(self):
+        self.assertFalse(launcher.APP_DEFAULTS['shader_notes'])
+        settings = {**launcher.APP_DEFAULTS}
+        settings.pop('shader_notes')
+        self.assertEqual(launcher.game_environment(settings)['SPARTAN_SHADER_NOTES'], '0')
+
+    def test_saved_shader_notes_choice_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'settings.json'
+            for enabled in (True, False):
+                with self.subTest(enabled=enabled):
+                    config.write_text('{"shader_notes": ' + str(enabled).lower() + '}', encoding='utf-8')
+                    settings = launcher.load_app_settings(config)
+                    self.assertEqual(settings['shader_notes'], enabled)
+                    self.assertEqual(launcher.game_environment(settings)['SPARTAN_SHADER_NOTES'],
+                                     '1' if enabled else '0')
+
     def test_new_cheats_default_to_disabled(self):
         self.assertEqual(launcher.INI_DEFAULTS['cheat_double_jumps'], '0')
         self.assertEqual(launcher.INI_DEFAULTS['cheat_very_hard'], '0')
@@ -75,11 +131,11 @@ class ControlMapTest(unittest.TestCase):
     def test_pipeline_binary_cache_switch(self):
         settings = {**launcher.APP_DEFAULTS}
         self.assertFalse(settings['pipeline_binary_cache'])
-        self.assertEqual(launcher.game_environment(settings)['GOW3_PIPELINE_BINARIES'], '0')
+        self.assertEqual(launcher.game_environment(settings)['SPARTAN_PIPELINE_BINARIES'], '0')
         settings['pipeline_binary_cache'] = True
-        self.assertEqual(launcher.game_environment(settings)['GOW3_PIPELINE_BINARIES'], '1')
+        self.assertEqual(launcher.game_environment(settings)['SPARTAN_PIPELINE_BINARIES'], '1')
         settings['pipeline_binary_cache'] = False
-        self.assertEqual(launcher.game_environment(settings)['GOW3_PIPELINE_BINARIES'], '0')
+        self.assertEqual(launcher.game_environment(settings)['SPARTAN_PIPELINE_BINARIES'], '0')
 
     def test_changed_buttons_in_table_order(self):
         controls = {'key': {'circle': ' Left Shift ', 'cross': 'Q', 'square': ''}, 'pad': {'cross': 'b'}}
@@ -172,8 +228,9 @@ class ControlMapTest(unittest.TestCase):
             default = launcher.KEY_DEFAULTS.get(button, key)
             if default.casefold() != key.casefold():
                 self.assertEqual(pairs.pop(button), default)
-        self.assertEqual(pairs, {'grab': 'C', 'dodge': 'Mouse Back'})
-        self.assertIn('l3=None,r3=None,rage=Mouse Middle', launcher.keyboard_map({}))
+        self.assertEqual(pairs, {'grab': 'C', 'dodge': 'Mouse Back',
+                                 'weapon_next': 'Wheel Up', 'weapon_prev': 'Wheel Down'})
+        self.assertIn('l3=None,r3=None,rage=F', launcher.keyboard_map({}))
         controls = {'key': {'square': 'Wheel Up', 'cross': 'Q', 'triangle': 'E'}}
         self.assertIn('cross=Q,square=Wheel Up,triangle=E,', launcher.keyboard_map(controls))
         values = {row[0]: launcher.default_input(row, 'key') for row in launcher.table_rows('key')}
@@ -184,13 +241,25 @@ class ControlMapTest(unittest.TestCase):
     def test_actions_belong_to_the_keyboard_table(self):
         names = [row[0] for row in launcher.table_rows('key')]
         self.assertEqual(names[names.index('r3') + 1], 'rage')
-        self.assertEqual(names[-2:], ['grab', 'dodge'])
+        self.assertEqual(names[-4:], ['grab', 'dodge', 'weapon_next', 'weapon_prev'])
         self.assertNotIn('dodge', [row[0] for row in launcher.table_rows('pad')])
         self.assertEqual(launcher.control_values({'key': {'dodge': 'V'}}, 'key'), {'dodge': 'V'})
         self.assertIn('dodge=V', launcher.keyboard_map({'key': {'dodge': 'V'}}))
         self.assertIn('grab=None', launcher.keyboard_map({'key': {'grab': 'None'}}))
         self.assertTrue(launcher.APP_DEFAULTS['rage_one_input'])
         self.assertNotIn('native_input', launcher.APP_DEFAULTS)
+
+    def test_the_wheel_cycles_the_weapons_by_default(self):
+        defaults = {row[0]: launcher.default_input(row, 'key') for row in launcher.table_rows('key')}
+        self.assertEqual((defaults['weapon_next'], defaults['weapon_prev']), ('Wheel Up', 'Wheel Down'))
+        self.assertEqual((launcher.ACTION_NAMES['weapon_next'], launcher.ACTION_NAMES['weapon_prev']),
+                         ('Next weapon', 'Previous weapon'))
+        self.assertIn('weapon_next=Wheel Up,weapon_prev=Wheel Down', launcher.keyboard_map({}))
+        env = launcher.game_environment(dict(launcher.APP_DEFAULTS))
+        self.assertTrue(env['SPARTAN_KEY_MAP'].endswith('weapon_next=Wheel Up,weapon_prev=Wheel Down'))
+        moved = launcher.keyboard_map({'key': {'weapon_next': 'Mouse Back', 'weapon_prev': 'None'}})
+        self.assertIn('weapon_next=Mouse Back,weapon_prev=None', moved)
+        self.assertEqual(launcher.APP_DEFAULTS['controls_layout'], launcher.CONTROLS_LAYOUT)
 
     def test_rage_switch_moves_l3_and_r3_to_one_input(self):
         controls = {'key': {'l3': 'Z', 'r3': 'X', 'rage': 'Mouse Middle'}}
@@ -199,18 +268,18 @@ class ControlMapTest(unittest.TestCase):
         self.assertNotIn('rage=', apart)
         self.assertIn('l3=None,r3=None,rage=Mouse Middle', launcher.keyboard_map(controls))
         env = launcher.game_environment({**launcher.APP_DEFAULTS, 'controls': controls})
-        self.assertIn('l3=None,r3=None,rage=Mouse Middle', env['GOW3_KEY_MAP'])
+        self.assertIn('l3=None,r3=None,rage=Mouse Middle', env['SPARTAN_KEY_MAP'])
         env = launcher.game_environment({**launcher.APP_DEFAULTS, 'controls': controls, 'rage_one_input': False})
-        self.assertIn('r3=X', env['GOW3_KEY_MAP'])
+        self.assertIn('r3=X', env['SPARTAN_KEY_MAP'])
 
     def test_stick_prompts_reach_the_game(self):
-        with mock.patch.dict(os.environ, {'GOW3_STICK_PROMPTS': 'mouse'}):  # left over from a shell
+        with mock.patch.dict(os.environ, {'SPARTAN_STICK_PROMPTS': 'mouse'}):  # left over from a shell
             env = launcher.game_environment(dict(launcher.APP_DEFAULTS))
-        self.assertEqual(env['GOW3_STICK_PROMPTS'], 'keyboard')
+        self.assertEqual(env['SPARTAN_STICK_PROMPTS'], 'keyboard')
         mouse = launcher.game_environment({**launcher.APP_DEFAULTS, 'stick_prompts': 'mouse'})
-        self.assertEqual(mouse['GOW3_STICK_PROMPTS'], 'mouse')
+        self.assertEqual(mouse['SPARTAN_STICK_PROMPTS'], 'mouse')
         odd = launcher.game_environment({**launcher.APP_DEFAULTS, 'stick_prompts': 'joystick'})
-        self.assertNotIn('GOW3_STICK_PROMPTS', odd)
+        self.assertNotIn('SPARTAN_STICK_PROMPTS', odd)
 
     def test_saved_keyboard_binds_keep_their_layout(self):
         old = {'controls': {'key': {'cross': 'Q'}, 'pad': {'cross': 'b'}}, 'pad_style': 'xbox'}
@@ -232,12 +301,56 @@ class ControlMapTest(unittest.TestCase):
         self.assertFalse(apart['rage_one_input'])
         taken = launcher.migrate_controls({'controls': {'key': {'cross': 'Mouse Back'}}})
         self.assertEqual(taken['controls']['key']['dodge'], 'None')
+        self.assertEqual((key['weapon_next'], key['weapon_prev']), ('Wheel Up', 'Wheel Down'))
+        wheel = launcher.migrate_controls({'controls': {'key': {'cross': 'Wheel Down'}}})
+        self.assertEqual((wheel['controls']['key']['weapon_next'], wheel['controls']['key']['weapon_prev']),
+                         ('Wheel Up', 'None'))
+
+    def test_layout_two_keeps_its_table_and_gets_the_weapon_cycle(self):
+        free = launcher.migrate_controls({'controls_layout': 2, 'controls': {'key': {'cross': 'Q', 'dodge': 'V'}}})
+        self.assertEqual(free['controls']['key'], {'cross': 'Q', 'dodge': 'V', 'rage': 'Mouse Middle'})  # not rebuilt
+        self.assertEqual(free['controls_layout'], launcher.CONTROLS_LAYOUT)
+        self.assertIn('weapon_next=Wheel Up,weapon_prev=Wheel Down', launcher.keyboard_map(free['controls']))
+        self.assertIn('square=Mouse Left', launcher.keyboard_map(free['controls']))
+        self.assertEqual(launcher.migrate_controls(free), free)  # once
+        busy = launcher.migrate_controls({'controls_layout': 2, 'controls': {'key': {'dodge': 'Wheel Up'}}})
+        self.assertEqual(busy['controls']['key'], {'dodge': 'Wheel Up', 'rage': 'Mouse Middle', 'weapon_next': 'None'})
+        both = launcher.migrate_controls({'controls_layout': 2, 'controls': {'key': {'r1': 'Wheel Up', 'l1': 'Wheel Down'}}})
+        game = launcher.keyboard_map(both['controls'])
+        self.assertIn('weapon_next=None,weapon_prev=None', game)
+        self.assertIn('l1=Wheel Down,r1=Wheel Up', game)
+        # The wheel on L3 only counts while L3 is sent: with one Rage input it is free.
+        spare = launcher.migrate_controls({'controls_layout': 2, 'controls': {'key': {'l3': 'Wheel Up'}}})
+        self.assertNotIn('weapon_next', spare['controls']['key'])
+        apart = launcher.migrate_controls({'controls_layout': 2, 'rage_one_input': False,
+                                           'controls': {'key': {'l3': 'Wheel Up'}}})
+        self.assertEqual(apart['controls']['key']['weapon_next'], 'None')
+        untouched = launcher.migrate_controls({'controls_layout': 2, 'game_dir': 'D:/games'})
+        self.assertEqual(untouched['controls'], {})
+        self.assertIn('weapon_next=Wheel Up', launcher.keyboard_map(untouched['controls']))
+
+    def test_rage_moves_to_f_but_a_saved_table_keeps_the_wheel_click(self):
+        self.assertEqual(launcher.default_input(launcher.RAGE_ROW, 'key'), 'F')
+        self.assertIn('rage=F', launcher.game_environment(dict(launcher.APP_DEFAULTS))['SPARTAN_KEY_MAP'])
+        kept = launcher.migrate_controls({'controls_layout': 2, 'controls': {'key': {'cross': 'Q'}}})
+        self.assertEqual(kept['controls']['key']['rage'], 'Mouse Middle')
+        self.assertIn('rage=Mouse Middle', launcher.keyboard_map(kept['controls']))
+        moved = launcher.migrate_controls({'controls_layout': 2, 'controls': {'key': {'rage': 'V'}}})
+        self.assertEqual(moved['controls']['key'], {'rage': 'V'})
+        fresh = launcher.migrate_controls({'controls_layout': 2, 'game_dir': 'D:/games'})
+        self.assertIn('rage=F', launcher.keyboard_map(fresh['controls']))
+        # The wheel click given to another row: Rage takes the new default instead of a second binding.
+        other = launcher.migrate_controls({'controls_layout': 2, 'controls': {'key': {'circle': 'Mouse Middle'}}})
+        self.assertNotIn('rage', other['controls']['key'])
+        self.assertIn('rage=F', launcher.keyboard_map(other['controls']))
 
     def test_native_translation_carries_over(self):
         old = {'controls': {'key': {'cross': 'Q'}, 'native': {'circle': 'Mouse Middle'}},
                'native_input': True, 'native_rage': True}
         new = launcher.migrate_controls(old)
         self.assertEqual(new['controls']['key'], {'circle': 'Mouse Middle'})
+        busy = launcher.migrate_controls({'controls': {'native': {'circle': 'Wheel Up'}}, 'native_input': True})
+        self.assertEqual(busy['controls']['key'], {'circle': 'Wheel Up', 'rage': 'Mouse Middle', 'weapon_next': 'None'})
         self.assertNotIn('native', new['controls'])
         self.assertNotIn('native_input', new)
         self.assertTrue(new['rage_one_input'])
@@ -260,51 +373,69 @@ class ControlMapTest(unittest.TestCase):
     def test_environment(self):
         settings = {**launcher.APP_DEFAULTS, 'controls': {'key': {'cross': 'Q'}}}
         env = launcher.game_environment(settings)
-        self.assertTrue(env['GOW3_KEY_MAP'].startswith('cross=Q,square=Mouse Left,'))
-        self.assertNotIn('GOW3_PAD_MAP', env)
-        self.assertEqual(env['GOW3_PARALLEL_WARMUP'], '1')
-        self.assertEqual(env['GOW3_BACKGROUND_WARMUP'], '1')
-        self.assertEqual(env['GOW3_PERF_DIAG'], '0')
-        self.assertEqual(env['GOW3_PARTIAL_HEIGHT_VIEWS'], '1')
-        self.assertEqual(launcher.game_environment({**settings, 'partial_height_views': False})['GOW3_PARTIAL_HEIGHT_VIEWS'], '0')
-        self.assertNotIn('GOW3_FRAME_CAPTURE_KEY', {k for k in env if k not in __import__('os').environ})
-        self.assertEqual(launcher.game_environment({**settings, 'frame_capture_key': True})['GOW3_FRAME_CAPTURE_KEY'], '1')
-        # Graphics options live in gow3.ini (run.py and the in-game menu), not in the environment.
-        for name in ('GOW3_FULLSCREEN', 'GOW3_PRESENT_MODE', 'GOW3_FPS_LIMIT', 'GOW3_ASYNC_SHADERS',
-                     'GOW3_DEFERRED_READBACK', 'GOW3_STALE_READBACK', 'GOW3_FSR1', 'GOW3_RCAS'):
+        self.assertTrue(env['SPARTAN_KEY_MAP'].startswith('cross=Q,square=Mouse Left,'))
+        self.assertNotIn('SPARTAN_PAD_MAP', env)
+        self.assertEqual(env['SPARTAN_PARALLEL_WARMUP'], '1')
+        self.assertEqual(env['SPARTAN_BACKGROUND_WARMUP'], '1')
+        self.assertEqual(env['SPARTAN_PERF_DIAG'], '0')
+        self.assertEqual(env['SPARTAN_PARTIAL_HEIGHT_VIEWS'], '1')
+        self.assertEqual(launcher.game_environment({**settings, 'partial_height_views': False})['SPARTAN_PARTIAL_HEIGHT_VIEWS'], '0')
+        self.assertEqual((env['SPARTAN_DISK_SHADERS'], env['SPARTAN_SHADER_PREFETCH'], env['SPARTAN_SHADER_NOTES']),
+                         ('1', '1', '0'))
+        off = launcher.game_environment({**settings, 'disk_shaders': False, 'shader_prefetch': False,
+                                         'shader_notes': False})
+        self.assertEqual((off['SPARTAN_DISK_SHADERS'], off['SPARTAN_SHADER_PREFETCH'], off['SPARTAN_SHADER_NOTES']),
+                         ('0', '0', '0'))
+        self.assertNotIn('SPARTAN_FRAME_CAPTURE_KEY', {k for k in env if k not in __import__('os').environ})
+        self.assertEqual(launcher.game_environment({**settings, 'frame_capture_key': True})['SPARTAN_FRAME_CAPTURE_KEY'], '1')
+        # Graphics options live in spartanport.ini (run.py and the in-game menu), not in the environment.
+        for name in ('SPARTAN_FULLSCREEN', 'SPARTAN_PRESENT_MODE', 'SPARTAN_FPS_LIMIT', 'SPARTAN_ASYNC_SHADERS',
+                     'SPARTAN_DEFERRED_READBACK', 'SPARTAN_STALE_READBACK', 'SPARTAN_FSR1', 'SPARTAN_RCAS'):
             self.assertNotIn(name, {k for k in env if k not in __import__('os').environ})
-        old = launcher.game_environment({**settings, 'extra_env': 'GOW3_DRAW_PIPE=0'})
-        self.assertNotIn('GOW3_DRAW_PIPE', old)  # the old free-text field is ignored
-        self.assertEqual(launcher.game_environment({**settings, 'parallel_warmup': False})['GOW3_PARALLEL_WARMUP'], '0')
-        self.assertEqual(launcher.game_environment({**settings, 'background_warmup': False})['GOW3_BACKGROUND_WARMUP'], '0')
+        old = launcher.game_environment({**settings, 'extra_env': 'SPARTAN_DRAW_PIPE=0'})
+        self.assertNotIn('SPARTAN_DRAW_PIPE', old)  # the old free-text field is ignored
+        self.assertEqual(launcher.game_environment({**settings, 'parallel_warmup': False})['SPARTAN_PARALLEL_WARMUP'], '0')
+        self.assertEqual(launcher.game_environment({**settings, 'background_warmup': False})['SPARTAN_BACKGROUND_WARMUP'], '0')
 
-    def test_temporal_upscaler_stays_off_with_a_saved_2_1_8_switch(self):
-        # 2.1.8 showed the experimental switch; a player who turned it on must not keep it on now that it is hidden.
-        for saved in (True, False, None):
+    def test_upscaler_switch_reaches_the_game(self):
+        # The Graphics page shows the switch again: its saved value decides, off when absent.
+        for saved, expected in ((True, '1'), (False, '0'), (None, '0')):
             env = launcher.game_environment({**launcher.APP_DEFAULTS, 'experimental_upscaler': saved})
-            self.assertEqual(env['GOW3_EXPERIMENTAL_UPSCALER'], '0')
+            self.assertEqual(env['SPARTAN_EXPERIMENTAL_UPSCALER'], expected)
 
     def test_glyph_style_is_off_by_default(self):
         self.assertEqual(launcher.APP_DEFAULTS['glyph_style'], 'off')
-        self.assertNotIn('GOW3_GLYPH_STYLE', launcher.game_environment({**launcher.APP_DEFAULTS}))
+        self.assertNotIn('SPARTAN_GLYPH_STYLE', launcher.game_environment({**launcher.APP_DEFAULTS}))
+
+    def test_glyph_style_ini_overrides_legacy_launcher_choice(self):
+        with tempfile.TemporaryDirectory() as folder:
+            ini = Path(folder) / 'spartanport.ini'
+            with mock.patch.object(launcher, 'ini_path', return_value=ini), \
+                    mock.patch.object(launcher, 'load_json', return_value={'glyph_style': 'nintendo'}):
+                self.assertEqual(launcher.load_ini()[0]['glyph_style'], 'nintendo')
+                ini.write_text('glyph_style=keyboard\n', encoding='utf-8')
+                values, _ = launcher.load_ini()
+                self.assertEqual(values['glyph_style'], 'keyboard')
+                options = launcher.graphics_options.startup_options(values)
+                self.assertEqual(launcher.graphics_options.environment(options)['SPARTAN_GLYPH_STYLE'], 'keyboard')
 
     def test_glyph_style_choices_reach_the_game(self):
         for style in ('auto', 'xbox', 'nintendo', 'keyboard'):
             env = launcher.game_environment({**launcher.APP_DEFAULTS, 'glyph_style': style})
-            self.assertEqual(env['GOW3_GLYPH_STYLE'], style)
+            self.assertEqual(env['SPARTAN_GLYPH_STYLE'], style)
 
     def test_unknown_glyph_style_is_off(self):
         for style in ('playstation', 'XBOX', 7, None, ''):
             env = launcher.game_environment({**launcher.APP_DEFAULTS, 'glyph_style': style})
-            self.assertNotIn('GOW3_GLYPH_STYLE', env)
+            self.assertNotIn('SPARTAN_GLYPH_STYLE', env)
 
     def test_inherited_glyph_style_is_dropped_when_off(self):
         from unittest import mock
 
-        with mock.patch.dict(launcher.os.environ, {'GOW3_GLYPH_STYLE': 'xbox'}):
-            self.assertNotIn('GOW3_GLYPH_STYLE', launcher.game_environment({**launcher.APP_DEFAULTS}))
+        with mock.patch.dict(launcher.os.environ, {'SPARTAN_GLYPH_STYLE': 'xbox'}):
+            self.assertNotIn('SPARTAN_GLYPH_STYLE', launcher.game_environment({**launcher.APP_DEFAULTS}))
             self.assertEqual(launcher.game_environment({**launcher.APP_DEFAULTS, 'glyph_style': 'nintendo'})
-                             ['GOW3_GLYPH_STYLE'], 'nintendo')
+                             ['SPARTAN_GLYPH_STYLE'], 'nintendo')
 
     def test_settings_keys_kept(self):
         for key in ('game_dir', 'user_dir', 'mods_dir', 'patches_dir', 'language', 'hdr',
@@ -313,17 +444,18 @@ class ControlMapTest(unittest.TestCase):
         # The player name option is gone: an old settings.json value is ignored.
         self.assertNotIn('player_name', launcher.APP_DEFAULTS)
         env = launcher.game_environment({**launcher.APP_DEFAULTS, 'player_name': ' Kratos '})
-        self.assertNotIn('GOW3_USER_NAME', env)
+        self.assertNotIn('SPARTAN_USER_NAME', env)
         for key in ('display_mode', 'fps_limit', 'render_resolution', 'engine_fps'):
             self.assertIn(key, launcher.INI_DEFAULTS)
 
     def test_graphics_defaults_match_the_game(self):
         d = launcher.INI_DEFAULTS
         self.assertEqual((d['display_mode'], d['vsync'], d['fps_limit'], d['engine_fps']), ('windowed', '1', '0', '120'))
-        self.assertEqual([v for v, _t in launcher.FPS_LIMITS], ['30', '60', '100', '120', '240', '0'])
+        self.assertEqual([v for v, _t in launcher.FPS_LIMITS], ['30', '60', '100', '120', '144', '180', '240', '0'])
+        self.assertEqual([v for v, _t in launcher.ENGINE_FPS_CHOICES], ['60', '100', '120', '144', '180', '240'])
         self.assertEqual(d['frames_queued'], '1')
         self.assertEqual([v for v, _t in launcher.FRAMES_QUEUED], ['1', '2', '0'])
-        self.assertNotIn('GOW3_FRAMES_AHEAD', launcher.game_environment({**launcher.APP_DEFAULTS, 'frames_ahead': '2'}))
+        self.assertNotIn('SPARTAN_FRAMES_AHEAD', launcher.game_environment({**launcher.APP_DEFAULTS, 'frames_ahead': '2'}))
 
 
 class GameFilesTest(unittest.TestCase):
@@ -337,7 +469,7 @@ class GameFilesTest(unittest.TestCase):
         for name in ('collect', 'play_button', 'status', 'meta_dir', 'summary', 'messagebox', 'show'):
             setattr(app, name, mock.Mock())
         with mock.patch.object(launcher.threading, 'Thread'), \
-                mock.patch.object(launcher, 'game_info', return_value=('God of War III', '01.02')):
+                mock.patch.object(launcher, 'game_info', return_value=('SpartanPort', '01.02')):
             app.adopt_in_background('Sc0', 'Image0')
             app.play()
             app.refresh_status()
@@ -418,7 +550,7 @@ class GameFilesTest(unittest.TestCase):
             self.assertEqual(launcher.describe_missing(missing)[2], 'sce_module/libc.prx (unreadable)')
 
     def test_ready_to_play_needs_a_complete_dump(self):
-        # The --play role (Steam, "Play God of War III.exe") opens the launcher instead of
+        # The --play role (Steam, "Play SpartanPort.exe") opens the launcher instead of
         # starting a dump the Play button would refuse.
         import tempfile
         from pathlib import Path
@@ -707,7 +839,7 @@ class GpuChoiceTest(unittest.TestCase):
         from unittest import mock
         with mock.patch.object(launcher, 'find_tool', return_value=None):
             self.assertEqual(launcher.list_gpus(), [])
-        with mock.patch.object(launcher, 'find_tool', return_value='gow3-gpu-capabilities.exe'):
+        with mock.patch.object(launcher, 'find_tool', return_value='spartanport-gpu-capabilities.exe'):
             with mock.patch.object(launcher.subprocess, 'run', side_effect=subprocess.TimeoutExpired('x', 5)):
                 self.assertEqual(launcher.list_gpus(), [])
             with mock.patch.object(launcher.subprocess, 'run', side_effect=OSError):
@@ -719,21 +851,21 @@ class GpuChoiceTest(unittest.TestCase):
 
     def test_gpu_choice_reaches_the_game(self):
         from unittest import mock
-        with mock.patch.dict(launcher.os.environ, {'GOW3_GPU_ID': '7'}):
+        with mock.patch.dict(launcher.os.environ, {'SPARTAN_GPU_ID': '7'}):
             env = launcher.game_environment({**launcher.APP_DEFAULTS, 'game_dir': 'x'})
-            self.assertIsNone(env.get('GOW3_GPU_ID'))  # Automatic wins over an inherited value
+            self.assertIsNone(env.get('SPARTAN_GPU_ID'))  # Automatic wins over an inherited value
             env = launcher.game_environment({**launcher.APP_DEFAULTS, 'game_dir': 'x', 'gpu_id': '1'})
-            self.assertEqual(env['GOW3_GPU_ID'], '1')
+            self.assertEqual(env['SPARTAN_GPU_ID'], '1')
             env = launcher.game_environment({**launcher.APP_DEFAULTS, 'game_dir': 'x', 'gpu_id': 'bad'})
-            self.assertIsNone(env.get('GOW3_GPU_ID'))
+            self.assertIsNone(env.get('SPARTAN_GPU_ID'))
         self.assertEqual(launcher.APP_DEFAULTS['gpu_id'], '')
 
 
 class ReleaseVersionTest(unittest.TestCase):
-    def test_god_of_war_release_is_newer_than_the_inherited_tags(self):
-        self.assertEqual(launcher.VERSION, '2.5.0')
+    def test_port_release_is_newer_than_the_inherited_tags(self):
+        self.assertEqual(launcher.VERSION, '2.7.0')
         self.assertGreater(launcher.version_tuple(launcher.VERSION), launcher.version_tuple('windows-v1.5'))
-        self.assertGreater(launcher.version_tuple('windows-v2.5.1'), launcher.version_tuple(launcher.VERSION))
+        self.assertGreater(launcher.version_tuple('windows-v2.7.1'), launcher.version_tuple(launcher.VERSION))
 
     def test_first_start_is_in_english(self):
         # The translations are partial; 'System' stays a choice in Advanced.
@@ -757,7 +889,7 @@ class PadStyleTest(unittest.TestCase):
         self.assertEqual(list(launcher.PAD_STYLES), ['playstation', 'xbox', 'nintendo'])
 
     def test_connected_gamepad_skips_a_probe_without_its_dlls(self):
-        on_disk = lambda path: path.name in ('gow3-probe.exe', 'gow3-probe')  # no SDL3.dll anywhere
+        on_disk = lambda path: path.name in ('spartanport-probe.exe', 'spartanport-probe')  # no SDL3.dll anywhere
         with mock.patch.object(launcher, 'WINDOWS', True), \
                 mock.patch.object(launcher.Path, 'is_file', on_disk), \
                 mock.patch.object(launcher.subprocess, 'run') as run:
@@ -778,3 +910,139 @@ class PadStyleTest(unittest.TestCase):
         import button_icons
         self.assertEqual(button_icons.spec('a', 'nintendo')[:2], ('letter', 'B'))
         self.assertEqual(button_icons.spec('lefttrigger', 'nintendo')[1], 'ZL')
+
+
+class MenuConfirmSwapTest(unittest.TestCase):
+    def test_menu_confirm_swap_defaults(self):
+        self.assertEqual(launcher.APP_DEFAULTS.get('menu_confirm_swap'), '0')
+        self.assertEqual(launcher.INI_DEFAULTS.get('menu_confirm_swap'), '0')
+        self.assertEqual([val for val, _label in launcher.MENU_CONFIRM_STYLES], ['0', '1'])
+
+    def test_menu_confirm_swap_ini_persistence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            ini = folder / 'spartanport.ini'
+            ini.write_text('menu_confirm_swap=1\n', encoding='utf-8')
+            with mock.patch.object(launcher, 'DATA_DIR', folder), \
+                    mock.patch.object(launcher, 'CONFIG_FILE', folder / 'settings.json'), \
+                    mock.patch.dict(os.environ, {'SPARTAN_CONFIG': str(ini)}):
+                values, _lines = launcher.load_ini()
+                self.assertEqual(values.get('menu_confirm_swap'), '1')
+
+    def test_menu_confirm_swap_legacy_migration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            cfg = folder / 'settings.json'
+            cfg.write_text('{"menu_confirm_swap": "1"}\n', encoding='utf-8')
+            ini = folder / 'spartanport.ini'
+            with mock.patch.object(launcher, 'DATA_DIR', folder), \
+                    mock.patch.object(launcher, 'CONFIG_FILE', cfg), \
+                    mock.patch.dict(os.environ, {'SPARTAN_CONFIG': str(ini)}):
+                values, _lines = launcher.load_ini()
+                self.assertEqual(values.get('menu_confirm_swap'), '1')
+
+    def test_game_environment_forwards_menu_confirm_swap(self):
+        settings_swapped = {**launcher.APP_DEFAULTS, 'game_dir': 'game', 'menu_confirm_swap': '1'}
+        env_swapped = launcher.game_environment(settings_swapped)
+        self.assertEqual(env_swapped.get('SPARTAN_MENU_CONFIRM_SWAP'), '1')
+
+        # Default option does not set SPARTAN_MENU_CONFIRM_SWAP
+        settings_default = {**launcher.APP_DEFAULTS, 'game_dir': 'game', 'menu_confirm_swap': '0'}
+        env_default = launcher.game_environment(settings_default)
+        self.assertNotIn('SPARTAN_MENU_CONFIRM_SWAP', env_default)
+
+    def test_conflicting_ini_primary_overrides_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            ini = folder / 'spartanport.ini'
+            cases = [
+                ('menu_confirm_swap=0\nmenu_confirm=circle\n', '0'),
+                ('menu_confirm=circle\nmenu_confirm_swap=0\n', '0'),
+                ('menu_confirm_swap=1\nmenu_confirm=cross\n', '1'),
+                ('menu_confirm=cross\nmenu_confirm_swap=1\n', '1'),
+                ('menu_confirm=circle\n', '1'),
+                ('menu_confirm=cross\n', '0'),
+            ]
+            for content, expected in cases:
+                with self.subTest(content=content, expected=expected):
+                    ini.write_text(content, encoding='utf-8')
+                    with mock.patch.object(launcher, 'DATA_DIR', folder), \
+                            mock.patch.object(launcher, 'CONFIG_FILE', folder / 'settings.json'), \
+                            mock.patch.dict(os.environ, {'SPARTAN_CONFIG': str(ini)}):
+                        values, _lines = launcher.load_ini()
+                        self.assertEqual(values.get('menu_confirm_swap'), expected)
+
+    def test_repeated_load_ini_removes_swap_and_switches_to_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            ini = folder / 'spartanport.ini'
+            with mock.patch.object(launcher, 'DATA_DIR', folder), \
+                    mock.patch.object(launcher, 'CONFIG_FILE', folder / 'settings.json'), \
+                    mock.patch.dict(os.environ, {'SPARTAN_CONFIG': str(ini)}):
+                # Run 1: primary menu_confirm_swap=0
+                ini.write_text('menu_confirm_swap=0\n', encoding='utf-8')
+                vals, _ = launcher.load_ini()
+                self.assertEqual(vals.get('menu_confirm_swap'), '0')
+
+                # Run 2: primary removed, alias menu_confirm=circle remains
+                ini.write_text('menu_confirm=circle\n', encoding='utf-8')
+                vals, _ = launcher.load_ini()
+                self.assertEqual(vals.get('menu_confirm_swap'), '1')
+
+                # Run 3: both removed, unrelated key
+                ini.write_text('vibration=50\n', encoding='utf-8')
+                vals, _ = launcher.load_ini()
+                self.assertEqual(vals.get('menu_confirm_swap'), '0')
+
+    def test_conflicting_legacy_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            cfg = folder / 'settings.json'
+            ini = folder / 'spartanport.ini'
+            cases = [
+                ('{"menu_confirm_swap": "0", "menu_confirm": "circle"}\n', '0'),
+                ('{"menu_confirm_swap": "1", "menu_confirm": "cross"}\n', '1'),
+                ('{"menu_confirm": "circle"}\n', '1'),
+                ('{"menu_confirm": "cross"}\n', '0'),
+            ]
+            for json_str, expected in cases:
+                with self.subTest(json_str=json_str, expected=expected):
+                    cfg.write_text(json_str, encoding='utf-8')
+                    if ini.exists():
+                        ini.unlink()
+                    with mock.patch.object(launcher, 'DATA_DIR', folder), \
+                            mock.patch.object(launcher, 'CONFIG_FILE', cfg), \
+                            mock.patch.dict(os.environ, {'SPARTAN_CONFIG': str(ini)}):
+                        values, _lines = launcher.load_ini()
+                        self.assertEqual(values.get('menu_confirm_swap'), expected)
+
+    def test_game_environment_clears_inherited_alias_and_handles_conflicts(self):
+        # When parent environment contains the alias SPARTAN_MENU_CONFIRM=circle
+        with mock.patch.dict(os.environ, {'SPARTAN_MENU_CONFIRM': 'circle', 'SPARTAN_MENU_CONFIRM_SWAP': '0'}):
+            settings_default = {**launcher.APP_DEFAULTS, 'game_dir': 'game', 'menu_confirm_swap': '0', 'menu_confirm': 'circle'}
+            env_default = launcher.game_environment(settings_default)
+            # Both must be absent so the child process is not overridden by leaked alias
+            self.assertNotIn('SPARTAN_MENU_CONFIRM_SWAP', env_default)
+            self.assertNotIn('SPARTAN_MENU_CONFIRM', env_default)
+
+            settings_swapped = {**launcher.APP_DEFAULTS, 'game_dir': 'game', 'menu_confirm_swap': '1'}
+            env_swapped = launcher.game_environment(settings_swapped)
+            self.assertEqual(env_swapped.get('SPARTAN_MENU_CONFIRM_SWAP'), '1')
+            self.assertNotIn('SPARTAN_MENU_CONFIRM', env_swapped)
+
+    def test_gameplay_controls_and_qte_remain_untouched(self):
+        # Default mapping in CONTROLS table: Cross is Space/a, Circle is Left Shift/b
+        control_dict = {b: (k, p) for b, k, p in launcher.CONTROLS}
+        self.assertEqual(control_dict['cross'], ('Space', 'a'))
+        self.assertEqual(control_dict['circle'], ('Left Shift', 'b'))
+
+        # Uncustomized pad controls produce no gamepad overrides
+        self.assertEqual(launcher.control_map({}, 'pad'), '')
+
+        # Gamepad styles preserve Cross (a) and Circle (b) definitions
+        ps_names = launcher.PAD_STYLES['playstation']
+        self.assertEqual(ps_names['a'], 'Cross')
+        self.assertEqual(ps_names['b'], 'Circle')
+        xbox_names = launcher.PAD_STYLES['xbox']
+        self.assertEqual(xbox_names['a'], 'A')
+        self.assertEqual(xbox_names['b'], 'B')

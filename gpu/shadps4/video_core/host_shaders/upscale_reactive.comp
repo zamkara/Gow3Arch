@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// gow3: FSR reactive mask from the scene color before and after the game's blended
+// spartanport: FSR reactive mask from the scene color before and after the game's blended
 // (transparent: particles, fire, glass, effects) draws. Where they changed the color, the
 // upscaler relies less on history, so moving effects do not smear or ghost.
 #version 450
@@ -18,7 +18,7 @@ layout(push_constant) uniform Params {
 
 void main() {
     const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(pixel, imageSize(scene)))) {
+    if (any(greaterThanEqual(pixel, imageSize(reactive)))) {
         return;
     }
     const vec3 before = max(imageLoad(opaque, pixel).rgb, vec3(0.0));

@@ -1,14 +1,14 @@
-// Performance overlay text and settings (gow3_perf_stats.h, gow3_settings.cpp).
+// Performance overlay text and settings (spartanport_perf_stats.h, spartanport_settings.cpp).
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
-#include "gow3_perf_stats.h"
-#include "gow3_settings.h"
+#include "spartanport_perf_stats.h"
+#include "spartanport_settings.h"
 
-namespace P = Gow3PerfStats;
+namespace P = SpartanPerfStats;
 
 static std::string Read(const char* path) {
     std::ifstream in(path);
@@ -40,6 +40,14 @@ int main() {
     assert(P::Format(s, P::Cpu | P::Vram, true) == "CPU 34%   VRAM 5.4 / 12.0 GB");
     assert(P::Format(s, 0, true).empty());
 
+    P::Sample fg;
+    fg.fps = 120.0f;
+    fg.game_fps = 60.0f;
+    assert(P::Format(fg, P::Fps, true) == "FG 120 FPS (60FPS Game)");
+    assert(P::Format(fg, P::Fps, false) == "FG 120 FPS (60FPS Game)");
+    fg.game_fps = 0.0f;
+    assert(P::Format(fg, P::Fps, true) == "120 FPS");
+
     P::Sample unknown;
     unknown.upscaler = "";
     assert(P::Format(unknown, P::Upscaler | P::Gpu | P::Cpu | P::Ram | P::Vram, false) ==
@@ -55,13 +63,13 @@ int main() {
                "overlay_opacity=-5\noverlay_layout=1\nmenu_tab=3\noverlay_interval_ms=2000\n";
     }
 #ifdef _WIN32
-    _putenv_s("GOW3_CONFIG", path);
+    _putenv_s("SPARTAN_CONFIG", path);
 #else
-    setenv("GOW3_CONFIG", path, 1);
+    setenv("SPARTAN_CONFIG", path, 1);
 #endif
-    auto& v = Gow3Settings::Get();
+    auto& v = SpartanSettings::Get();
     assert(v.overlay_items == P::DefaultItems && v.overlay_scale == 100 && v.overlay_corner == 1);
-    Gow3Settings::Load();
+    SpartanSettings::Load();
     assert(v.overlay_items == (P::FrameTime | P::Gpu | P::Cpu | P::Vram));
     assert(v.overlay_scale == 300 && v.overlay_corner == 2 && v.overlay_opacity == 0);
     assert(v.overlay_layout == 1 && v.menu_tab == 3);
@@ -71,7 +79,7 @@ int main() {
     v.overlay_scale = 150;
     v.overlay_opacity = 70;
     v.menu_tab = 1;
-    Gow3Settings::Save();
+    SpartanSettings::Save();
     const std::string saved = Read(path);
     for (const char* line : {"overlay_fps=1\n", "overlay_frametime=0\n", "overlay_ram=1\n", "overlay_vram=0\n",
                              "overlay_scale=150\n", "overlay_corner=2\n", "overlay_opacity=70\n",
@@ -82,14 +90,14 @@ int main() {
         std::ofstream out(path);
         out << "overlay_corner=9\nmenu_tab=-1\noverlay_scale=10\noverlay_interval_ms=0\n";
     }
-    Gow3Settings::Load();
+    SpartanSettings::Load();
     assert(v.overlay_corner == 1 && v.menu_tab == 0 && v.overlay_scale == 50);
     assert(v.overlay_interval_ms == 1000);
     {
         std::ofstream out(path);
         out << "overlay_interval_ms=99999\n";
     }
-    Gow3Settings::Load();
+    SpartanSettings::Load();
     assert(v.overlay_interval_ms == 10000);
     std::remove(path);
     std::puts("PASS: performance overlay");

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// gow3: GOW3_GPU_PROFILE=1 — GPU time per render pass, dispatch and upscaler run. A timestamp is
+// spartanport: SPARTAN_GPU_PROFILE=1 — GPU time per render pass, dispatch and upscaler run. A timestamp is
 // written where each of them starts (and at the frame end); the time to the next timestamp is
 // charged to its label, barriers and copies recorded in between included. Results are read four
 // frames later and printed every 5 s: GPU ms per frame by label.
@@ -7,6 +7,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <string>
@@ -23,9 +24,9 @@ class Scheduler;
 
 class GpuProfiler {
 public:
-    /// The profiler when GOW3_GPU_PROFILE=1, else null.
+    /// The profiler when SPARTAN_GPU_PROFILE=1, else null.
     static GpuProfiler* Get() noexcept {
-        return instance_ptr;
+        return instance_ptr.load(std::memory_order_acquire);
     }
     static void Init(const Instance& instance, Scheduler& scheduler);
 
@@ -63,7 +64,7 @@ private:
 
     static constexpr u32 NumSlices = 4;
     static constexpr u32 SliceQueries = 4096;
-    static inline GpuProfiler* instance_ptr = nullptr;
+    static inline std::atomic<GpuProfiler*> instance_ptr{nullptr};
 
     vk::Device device;
     Scheduler& scheduler;

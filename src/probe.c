@@ -5,16 +5,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <SDL3/SDL.h>
 #include "runtime.h"
 #include "cpu_check.h"
 #include "isa_rewrite.h"
 #include "orb_hook.h"
 #include "cheat_hook.h"
 #include "qte_hook.h"
+#include "switch_hook.h"
 #include "actor_hook.h"
+#include "player_hook.h"
+#include "ledge_hook.h"
 #include "damage_hook.h"
 #include "menu_hook.h"
-#include "gpu/gow3gpu.h"
+#include "graphics_hook.h"
+#include "gpu/spartanportgpu.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -46,7 +51,10 @@ static int entered_game;
 static int gpu_enabled;
 static unsigned cpu_missing_sets; /* CPU_SET_* the host lacks; the guest code needs them rewritten */
 static IsaTable *isa_table; /* rewritten sites (--isa-rewrite); the fault handlers and the report read it */
-static void isa_report_hook(void) { isa_rewrite_report(isa_table, stdout); }
+static void loader_report_hook(void) {
+    if (isa_table) isa_rewrite_report(isa_table, stdout);
+    if (gpu_enabled) printf("GPU: copy waits yielded %llu times\n", spartanportgpu_copy_yields());
+}
 int vulkan_smoke(void);
 
 static void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message); exit(1); }
@@ -142,7 +150,7 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
         fprintf(stderr,"Fault: exception 0x%08lx at %s (thread %lu)\n",record->ExceptionCode,where,GetCurrentThreadId());
     fprintf(stderr,"  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
-    if (gpu_enabled) gow3gpu_dump_guest_writes(info);
+    if (gpu_enabled) spartanportgpu_dump_guest_writes(info);
     /* rbp chain (guest and host code keep frame pointers). */
     uintptr_t rbp=(uintptr_t)c->Rbp;
     for (int depth=0; depth<24 && rbp; ++depth) {
@@ -181,17 +189,17 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
     }
     if (code==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2) {
         /* GPU page tracking (write-protected guest pages) is resolved first. */
-        if (gpu_enabled && gow3gpu_handle_fault(info,(void *)record->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
+        if (gpu_enabled && spartanportgpu_handle_fault(info,(void *)record->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
         if (runtime_fault_recover) {
             /* A speculative guest memory read (GPU draw preparation) faulted: the thread resumes
-             * in gow3_longjmp, outside the exception dispatcher, back at its recovery point. */
+             * in spartanport_longjmp, outside the exception dispatcher, back at its recovery point. */
             unsigned long long *buffer=*runtime_fault_recover;
             runtime_fault_recover=NULL;
             CONTEXT *c=info->ContextRecord;
             c->Rsp=((c->Rsp-128)&~(DWORD64)15)-40;
             c->Rcx=(DWORD64)(uintptr_t)buffer;
             c->Rdx=1;
-            c->Rip=(DWORD64)(uintptr_t)gow3_longjmp;
+            c->Rip=(DWORD64)(uintptr_t)spartanport_longjmp;
             return EXCEPTION_CONTINUE_EXECUTION;
         }
     }
@@ -206,7 +214,7 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
                  !module;
         if (ours) return fatal_exception(info);
     }
-    /* GOW3_STRICT_HANDLES=1: a closed or invalid handle used anywhere is reported (diagnostics). */
+    /* SPARTAN_STRICT_HANDLES=1: a closed or invalid handle used anywhere is reported (diagnostics). */
     if (code==0xC0000008 /* STATUS_INVALID_HANDLE */) return fatal_exception(info);
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -247,7 +255,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
         }
     }
     /* GPU page tracking (write-protected guest pages) is resolved first. */
-    if (gpu_enabled && sig == SIGSEGV && gow3gpu_handle_fault(context, info->si_addr)) return;
+    if (gpu_enabled && sig == SIGSEGV && spartanportgpu_handle_fault(context, info->si_addr)) return;
     /* A speculative guest memory read (runtime_memory.c) failed: resume its recovery point. */
     if ((sig == SIGSEGV || sig == SIGBUS) && runtime_fault_recover) {
         sigjmp_buf *recover = runtime_fault_recover;
@@ -277,7 +285,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
     else
         snprintf(line, sizeof(line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, info->si_addr);
     { ssize_t written_=write(2, line, strlen(line)); (void)written_; }
-    if (gpu_enabled) gow3gpu_dump_guest_writes(context);
+    if (gpu_enabled) spartanportgpu_dump_guest_writes(context);
     /* Host call chain (frames with unwind info; guest frames end it). */
     void *frames[32];
     int depth = backtrace(frames, 32);
@@ -369,47 +377,78 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
             address - segments[i].address <= segments[i].size - bytes) return 1;
     return 0;
 }
-extern ABI float gow3_orbs_gain(void *player, float requested);
-extern void gow3_orbs_status(int supported);
-extern uintptr_t gow3_cheat_flag(unsigned id);
-extern uintptr_t gow3_actor_slots_address(void);
-extern void gow3_actor_status(int supported);
-extern void gow3_cheat_status(unsigned id);
-extern uintptr_t gow3_damage_multiplier(int taken);
-extern uintptr_t gow3_orb_pickup_multiplier(unsigned kind);
-extern void gow3_stat_multipliers_status(int damage, int orb_pickup);
-extern uintptr_t gow3_qte_state_address(void);
+extern ABI float spartanport_orbs_gain(void *player, float requested);
+extern void spartanport_orbs_status(int supported);
+extern uintptr_t spartanport_cheat_flag(unsigned id);
+extern uintptr_t spartanport_actor_slots_address(void);
+extern void spartanport_actor_status(int supported);
+extern void spartanport_cheat_status(unsigned id);
+extern uintptr_t spartanport_damage_multiplier(int taken);
+extern uintptr_t spartanport_orb_pickup_multiplier(unsigned kind);
+extern void spartanport_stat_multipliers_status(int damage, int orb_pickup);
+extern uintptr_t spartanport_qte_state_address(void);
+extern void spartanport_qte_status(int supported);
+extern uintptr_t spartanport_auto_qte_flag(void);
+extern uintptr_t spartanport_switch_state_address(void);
+extern void spartanport_switch_status(int supported);
+extern ABI int spartanport_switch_input(const unsigned char *branch, uintptr_t caller);
+extern ABI const unsigned char *spartanport_switch_queue(const unsigned char *branch);
 
 /* The hooks below find their sites by signature (src/signature.h), so they work in any region
  * and version of the game whose code matches; a site that is not found leaves its feature off. */
+static void find_save_preview(Segment *segments, uint64_t count, uint64_t size) {
+    const SpartanSignature site={
+        "4c 8d 3d ?? ?? ?? ?? 48 8d 35 ?? ?? ?? ?? 48 8d 15 ?? ?? ?? ?? 31 c0 44 89 e9 4c 89 ff e8 ?? ?? ?? ??",0};
+    runtime_savedata_preview_path(NULL);
+    uint64_t at=spartanport_signature_find(image,size,&site);
+    if (at==UINT64_MAX || !mapped(segments,count,at,33)) return;
+    const char *expected[]={NULL,"%sSAVEDATA/SAVEPT%02u.PNG","/app0/EXEC/ICONS/"};
+    uint64_t target[3];
+    for (unsigned i=0;i<3;++i) {
+        int32_t relative; memcpy(&relative,image+at+i*7+3,4);
+        int64_t offset=(int64_t)at+(i+1)*7+relative;
+        size_t length=i ? strlen(expected[i])+1 : 128;
+        if (offset<0 || !mapped(segments,count,(uint64_t)offset,length)) return;
+        target[i]=(uint64_t)offset;
+        if (i && memcmp(image+target[i],expected[i],length)) return;
+    }
+    int writable=0;
+    for (uint64_t i=0;i<count;++i)
+        if ((segments[i].flags&2) && target[0]>=segments[i].address &&
+            target[0]-segments[i].address<segments[i].size &&
+            128<=segments[i].size-(target[0]-segments[i].address)) writable=1;
+    if (!writable) return;
+    runtime_savedata_preview_path((const char *)image+target[0]);
+    puts("Save preview: pending manual-save image located");
+}
 static void install_cheats(Segment *segments, uint64_t count, uint64_t size) {
     const char *names[] = {"health", "magic", "item meter", "Rage of Sparta", "red orbs",
                            "Very Hard unlock", "infinite double jumps"};
-    uint64_t at[GOW3_CHEAT_HOOK_COUNT];
-    for (unsigned i = 0; i < GOW3_CHEAT_HOOK_COUNT; ++i)
-        at[i] = gow3_signature_find(image, size, &gow3_cheat_hooks[i].site);
-    for (unsigned id = 0; id < GOW3_CHEAT_COUNT; ++id) {
+    uint64_t at[SPARTAN_CHEAT_HOOK_COUNT];
+    for (unsigned i = 0; i < SPARTAN_CHEAT_HOOK_COUNT; ++i)
+        at[i] = spartanport_signature_find(image, size, &spartanport_cheat_hooks[i].site);
+    for (unsigned id = 0; id < SPARTAN_CHEAT_COUNT; ++id) {
         int valid = 1;
-        for (unsigned i = 0; i < GOW3_CHEAT_HOOK_COUNT; ++i) {
-            const Gow3CheatHook *hook = &gow3_cheat_hooks[i];
+        for (unsigned i = 0; i < SPARTAN_CHEAT_HOOK_COUNT; ++i) {
+            const SpartanCheatHook *hook = &spartanport_cheat_hooks[i];
             if (hook->id != id) continue;
             if (at[i] == UINT64_MAX || !mapped(segments, count, at[i], hook->length) ||
-                !gow3_cheat_signature_match(hook, image + at[i], size - at[i])) valid = 0;
+                !spartanport_cheat_signature_match(hook, image + at[i], size - at[i])) valid = 0;
         }
         if (!valid) {
             printf("Cheats: %s unavailable (code not found in this eboot.bin)\n", names[id]);
             continue;
         }
         unsigned char *stubs = allocate(page_size);
-        int32_t relative[GOW3_CHEAT_HOOK_COUNT] = {0};
-        for (unsigned i = 0; i < GOW3_CHEAT_HOOK_COUNT; ++i) {
-            const Gow3CheatHook *hook = &gow3_cheat_hooks[i];
+        int32_t relative[SPARTAN_CHEAT_HOOK_COUNT] = {0};
+        for (unsigned i = 0; i < SPARTAN_CHEAT_HOOK_COUNT; ++i) {
+            const SpartanCheatHook *hook = &spartanport_cheat_hooks[i];
             if (hook->id != id) continue;
             unsigned char *stub = stubs + i * 256;
             int64_t delta = (int64_t)(uintptr_t)stub - (int64_t)(uintptr_t)(image + at[i] + 5);
             if (delta < INT32_MIN || delta > INT32_MAX) { valid = 0; break; }
             relative[i] = (int32_t)delta;
-            gow3_cheat_build_stub(stub, hook, gow3_cheat_flag(id),
+            spartanport_cheat_build_stub(stub, hook, spartanport_cheat_flag(id),
                                  (uintptr_t)(image + at[i] + hook->length));
         }
         if (!valid) {
@@ -417,14 +456,14 @@ static void install_cheats(Segment *segments, uint64_t count, uint64_t size) {
             continue;
         }
         protect(stubs, page_size, 5);
-        for (unsigned i = 0; i < GOW3_CHEAT_HOOK_COUNT; ++i) {
-            const Gow3CheatHook *hook = &gow3_cheat_hooks[i];
+        for (unsigned i = 0; i < SPARTAN_CHEAT_HOOK_COUNT; ++i) {
+            const SpartanCheatHook *hook = &spartanport_cheat_hooks[i];
             if (hook->id != id) continue;
             image[at[i]] = 0xe9;
             memcpy(image + at[i] + 1, &relative[i], 4);
             memset(image + at[i] + 5, 0x90, hook->length - 5);
         }
-        gow3_cheat_status(id);
+        spartanport_cheat_status(id);
         printf("Cheats: %s ready (live toggle, initially disabled unless saved)\n", names[id]);
     }
 }
@@ -432,13 +471,13 @@ static void install_cheats(Segment *segments, uint64_t count, uint64_t size) {
 /* The engine's frame rate setter, called once at start-up with 59.94 (the frame rate patches
  * change that constant): it stores the maximum frame rate as a float and rounded, and the frame
  * timing reads both every frame. Writing them changes the engine rate live (SyncEngineFps). */
-extern void gow3_engine_fps_globals(uintptr_t fps, uintptr_t rounded);
-static const Gow3Signature engine_fps_setter={
+extern void spartanport_engine_fps_globals(uintptr_t fps, uintptr_t rounded);
+static const SpartanSignature engine_fps_setter={
     "48 8d 05 ?? ?? ?? ?? c5 fa 11 00 c5 fa 58 0d ?? ?? ?? ?? c5 fa 2c c1 48 8d 0d ?? ?? ?? ?? 89 01",0};
 static uint64_t engine_fps_at, engine_rounded_at; /* image offsets; 0: not found */
 /* Before the image is protected: the search reads the gaps between segments too. */
 static void find_engine_fps(Segment *segments, uint64_t count, uint64_t size) {
-    const uint64_t at=gow3_signature_find(image,size,&engine_fps_setter);
+    const uint64_t at=spartanport_signature_find(image,size,&engine_fps_setter);
     if (at==UINT64_MAX) {
         puts("Engine FPS: live frame rate unavailable (code not found in this eboot.bin)");
         return;
@@ -459,16 +498,40 @@ static void find_engine_fps(Segment *segments, uint64_t count, uint64_t size) {
  * accessible between the two protect passes. */
 static void publish_engine_fps(void) {
     if (!engine_fps_at) return;
-    gow3_engine_fps_globals((uintptr_t)(image+engine_fps_at),(uintptr_t)(image+engine_rounded_at));
+    spartanport_engine_fps_globals((uintptr_t)(image+engine_fps_at),(uintptr_t)(image+engine_rounded_at));
     puts("Engine FPS: live frame rate ready (menu, R3 + L1 + R1 or F9)");
+}
+
+/* The upgrade menu's open flag (src/graphics_hook.h): Texture Quality skips its LOD bias while it
+ * is set (texture_cache.cpp), so the red orb medallion stays sharp. */
+extern void spartanport_power_up_menu_global(uintptr_t flag);
+static uint64_t power_up_menu_at; /* image offset; 0: not found */
+/* Before the image is protected, like find_engine_fps. */
+static void find_power_up_menu(Segment *segments, uint64_t count, uint64_t size) {
+    const uint64_t at=spartanport_signature_find(image,size,&spartanport_power_up_menu_site);
+    if (at==UINT64_MAX) {
+        puts("Texture Quality: upgrade menu exception unavailable (code not found in this eboot.bin)");
+        return;
+    }
+    const uint64_t flag=spartanport_rip_target(image,at+SPARTAN_POWER_UP_MENU_LEA);
+    if (!mapped(segments,count,flag,4)) {
+        puts("Texture Quality: upgrade menu exception unavailable (global outside the image)");
+        return;
+    }
+    power_up_menu_at=flag;
+}
+static void publish_power_up_menu(void) {
+    if (!power_up_menu_at) return;
+    spartanport_power_up_menu_global((uintptr_t)(image+power_up_menu_at));
+    puts("Texture Quality: upgrade menu keeps full detail");
 }
 
 /* Damage hook for the enemy health bar (src/actor_hook.h). Always
  * installed when the code matches: it only records values; the overlay decides what to show. */
 static void install_actor_watch(Segment *segments, uint64_t count, uint64_t size) {
-    const uint64_t at = gow3_signature_find(image, size, &gow3_actor_site);
-    if (at == UINT64_MAX || !mapped(segments, count, at, GOW3_ACTOR_HOOK_LENGTH) ||
-        !gow3_actor_signature_match(image + at, size - at)) {
+    const uint64_t at = spartanport_signature_find(image, size, &spartanport_actor_site);
+    if (at == UINT64_MAX || !mapped(segments, count, at, SPARTAN_ACTOR_HOOK_LENGTH) ||
+        !spartanport_actor_signature_match(image + at, size - at)) {
         printf("Health display: unavailable (code not found in this eboot.bin)\n");
         return;
     }
@@ -478,34 +541,89 @@ static void install_actor_watch(Segment *segments, uint64_t count, uint64_t size
         printf("Health display: unavailable (hook outside relative-jump range)\n");
         return;
     }
-    gow3_actor_build_stub(stub, gow3_actor_slots_address(), (uintptr_t)(image + at + GOW3_ACTOR_HOOK_LENGTH));
+    spartanport_actor_build_stub(stub, spartanport_actor_slots_address(), (uintptr_t)(image + at + SPARTAN_ACTOR_HOOK_LENGTH));
     protect(stub, page_size, 5);
     const int32_t relative = (int32_t)delta;
     image[at] = 0xe9;
     memcpy(image + at + 1, &relative, 4);
-    memset(image + at + 5, 0x90, GOW3_ACTOR_HOOK_LENGTH - 5);
-    gow3_actor_status(1);
+    memset(image + at + 5, 0x90, SPARTAN_ACTOR_HOOK_LENGTH - 5);
+    spartanport_actor_status(1);
     printf("Health display: damage hook ready (enemy health bar in the menu)\n");
 }
 
+/* Kratos' object (src/player_hook.h), for the Cronos blade pull cap in runtime_pad.c. */
+static void install_player_hook(Segment *segments, uint64_t count, uint64_t size) {
+    const uint64_t at = spartanport_signature_find(image, size, &spartanport_player_site);
+    if (at == UINT64_MAX || !mapped(segments, count, at, SPARTAN_PLAYER_HOOK_LENGTH) ||
+        !spartanport_player_match(image + at, size - at)) {
+        printf("Player hook: unavailable (code not found in this eboot.bin)\n");
+        return;
+    }
+    int32_t displacement;
+    memcpy(&displacement, image + at + 3, 4);
+    const int64_t rate = (int64_t)at + SPARTAN_PLAYER_HOOK_LENGTH + displacement;
+    unsigned char *stub = allocate(page_size);
+    const int64_t delta = (int64_t)(uintptr_t)stub - (int64_t)(uintptr_t)(image + at + 5);
+    if (rate < 0 || !mapped(segments, count, (uint64_t)rate, 4) || delta < INT32_MIN || delta > INT32_MAX) {
+        printf("Player hook: unavailable (operand or hook outside range)\n");
+        return;
+    }
+    spartanport_player_stub(stub, (uintptr_t)&runtime_player_object, (uintptr_t)(image + rate),
+                            (uintptr_t)(image + at + SPARTAN_PLAYER_HOOK_LENGTH));
+    protect(stub, page_size, 5);
+    const int32_t relative = (int32_t)delta;
+    image[at] = 0xe9;
+    memcpy(image + at + 1, &relative, 4);
+    memset(image + at + 5, 0x90, SPARTAN_PLAYER_HOOK_LENGTH - 5);
+    printf("Player hook: ready at image+0x%" PRIx64 "\n", at);
+}
+
+/* Wall seam fix (src/ledge_hook.h): present only when the launcher's "Wall Seam Fix" patch swapped
+ * 31 c9 for 33 c9 after the ledge ray call. */
+static _Alignas(64) SpartanLedgeCache ledge_cache;
+static void install_wall_seam_fix(Segment *segments, uint64_t count, uint64_t size) {
+    const uint64_t seam = spartanport_signature_find(image, size, &spartanport_ledge_site);
+    if (seam == UINT64_MAX) return;
+    int32_t call, lea;
+    memcpy(&call, image + seam + 1, 4);
+    memcpy(&lea, image + seam + 18, 4);
+    const int64_t callee = (int64_t)seam + 5 + call, result = (int64_t)seam + 22 + lea;
+    unsigned char *stub = allocate(page_size);
+    const int64_t delta = (int64_t)(uintptr_t)stub - (int64_t)(uintptr_t)(image + seam + 5);
+    if (callee < 0 || result < 0 || !mapped(segments, count, (uint64_t)callee, 1) ||
+        !mapped(segments, count, (uint64_t)result, SPARTAN_LEDGE_RESULT_WORDS * 4) ||
+        delta < INT32_MIN || delta > INT32_MAX) {
+        puts("Wall seam fix: skipped (call, result or hook outside range)");
+        return;
+    }
+    ledge_cache.result = (uintptr_t)(image + result);
+    spartanport_ledge_stub(stub, (uintptr_t)&ledge_cache, (uintptr_t)spartanport_ledge_ray,
+                           (uintptr_t)(image + callee), (uintptr_t)(image + seam + 5));
+    protect(stub, page_size, 5);
+    const int32_t relative = (int32_t)delta;
+    image[seam] = 0xe9;
+    memcpy(image + seam + 1, &relative, 4);
+    printf("Wall seam fix: ready at image+0x%" PRIx64 "\n", seam);
+}
+
 /* QTE prompts (src/qte_hook.h): a frame count in the prompt's update and an answer in its
- * rotation check, for the stick prompts in runtime_pad.c (typed or drawn rotations). Both or
- * neither; they do nothing until the player finishes a rotation that way. */
-static void install_qte_hooks(Segment *segments, uint64_t count, uint64_t size) {
-    const uint64_t sites[2] = {gow3_signature_find(image, size, &gow3_qte_update_site),
-                               gow3_signature_find(image, size, &gow3_qte_rotation_site)};
-    const unsigned char *originals[2] = {gow3_qte_update_original, gow3_qte_rotation_original};
+ * rotation check, for the stick prompts in runtime_pad.c and Automatic QTE. Both or neither;
+ * they do nothing until one of those answers a prompt. Returns 1 when installed. */
+static int install_qte_hooks(Segment *segments, uint64_t count, uint64_t size) {
+    const uint64_t sites[2] = {spartanport_signature_find(image, size, &spartanport_qte_update_site),
+                               spartanport_signature_find(image, size, &spartanport_qte_rotation_site)};
+    const unsigned char *originals[2] = {spartanport_qte_update_original, spartanport_qte_rotation_original};
     for (unsigned i = 0; i < 2; ++i) {
-        if (sites[i] == UINT64_MAX || !mapped(segments, count, sites[i], GOW3_QTE_BLOCK_NEXT) ||
-            memcmp(image + sites[i], originals[i], GOW3_QTE_HOOK_LENGTH)) {
+        if (sites[i] == UINT64_MAX || !mapped(segments, count, sites[i], SPARTAN_QTE_BLOCK_NEXT) ||
+            memcmp(image + sites[i], originals[i], SPARTAN_QTE_HOOK_LENGTH)) {
             printf("Stick prompts: unavailable (code not found in this eboot.bin)\n");
-            return;
+            return 0;
         }
     }
-    const uint64_t block = gow3_qte_block(image + sites[1], sites[1]);
-    if (!mapped(segments, count, block, GOW3_QTE_TYPE_OFFSET + 2)) {
+    const uint64_t block = spartanport_qte_block(image + sites[1], sites[1]);
+    if (!mapped(segments, count, block, SPARTAN_QTE_TYPE_OFFSET + 2)) {
         printf("Stick prompts: unavailable (prompt state outside the image)\n");
-        return;
+        return 0;
     }
     unsigned char *stubs = allocate(page_size);
     int32_t relative[2];
@@ -513,28 +631,137 @@ static void install_qte_hooks(Segment *segments, uint64_t count, uint64_t size) 
         const int64_t delta = (int64_t)(uintptr_t)(stubs + i * 128) - (int64_t)(uintptr_t)(image + sites[i] + 5);
         if (delta < INT32_MIN || delta > INT32_MAX) {
             printf("Stick prompts: unavailable (hook outside relative-jump range)\n");
-            return;
+            return 0;
         }
         relative[i] = (int32_t)delta;
     }
-    Gow3QteState *state = (Gow3QteState *)gow3_qte_state_address();
-    gow3_qte_build_update_stub(stubs, (uintptr_t)&state->heartbeat,
-                               (uintptr_t)(image + sites[0] + GOW3_QTE_HOOK_LENGTH));
-    gow3_qte_build_rotation_stub(stubs + 128, (uintptr_t)&state->pass,
-                                 (uintptr_t)(image + sites[1] + GOW3_QTE_HOOK_LENGTH));
+    SpartanQteState *state = (SpartanQteState *)spartanport_qte_state_address();
+    spartanport_qte_build_update_stub(stubs, (uintptr_t)&state->heartbeat,
+                               (uintptr_t)(image + sites[0] + SPARTAN_QTE_HOOK_LENGTH));
+    spartanport_qte_build_rotation_stub(stubs + 128, (uintptr_t)&state->pass, spartanport_auto_qte_flag(),
+                                 (uintptr_t)(image + sites[1] + SPARTAN_QTE_HOOK_LENGTH));
     protect(stubs, page_size, 5);
     for (unsigned i = 0; i < 2; ++i) {
         image[sites[i]] = 0xe9;
         memcpy(image + sites[i] + 1, &relative[i], 4);
-        memset(image + sites[i] + 5, 0x90, GOW3_QTE_HOOK_LENGTH - 5);
+        memset(image + sites[i] + 5, 0x90, SPARTAN_QTE_HOOK_LENGTH - 5);
     }
     state->block = (uint64_t)(uintptr_t)(image + block);
     printf("Stick prompts: rotation prompt hooks ready\n");
+    return 1;
+}
+
+/* Automatic QTE (src/qte_hook.h): the button check of timed prompts, the press query of repeated
+ * presses, the held buttons of charged presses and the Circle struggle; rotations go through the
+ * rotation stub above. Each site on its own: one that is not found leaves that kind to the player. */
+enum { AUTO_QTE_SITES = 4 };
+static void install_auto_qte_hooks(Segment *segments, uint64_t count, uint64_t size, int rotation) {
+    const SpartanSignature *signatures[AUTO_QTE_SITES] = {&spartanport_qte_timed_site, &spartanport_qte_repeat_site,
+                                                       &spartanport_qte_charged_site, &spartanport_qte_circle_site};
+    const unsigned lengths[AUTO_QTE_SITES] = {SPARTAN_QTE_TIMED_LENGTH, 5, SPARTAN_QTE_CHARGED_LENGTH,
+                                              SPARTAN_QTE_CIRCLE_LENGTH};
+    const char *names[AUTO_QTE_SITES] = {"button", "repeated press", "held press", "Circle struggle"};
+    const uintptr_t automatic = spartanport_auto_qte_flag();
+    SpartanQteState *state = (SpartanQteState *)spartanport_qte_state_address();
+    _Static_assert((int)AUTO_QTE_SITES == (int)SPARTAN_QTE_COUNTS, "one frame count per site");
+    unsigned char *stubs = allocate(page_size);
+    uint64_t sites[AUTO_QTE_SITES];
+    int32_t relative[AUTO_QTE_SITES] = {0};
+    int ready = 0;
+    for (unsigned i = 0; i < AUTO_QTE_SITES; ++i) {
+        sites[i] = spartanport_signature_find(image, size, signatures[i]);
+        if (sites[i] == UINT64_MAX || !mapped(segments, count, sites[i], lengths[i])) {
+            printf("Automatic QTE: %s prompts unavailable (code not found in this eboot.bin)\n", names[i]);
+            sites[i] = UINT64_MAX;
+            continue;
+        }
+        unsigned char *stub = stubs + i * 128;
+        const int64_t delta = (int64_t)(uintptr_t)stub - (int64_t)(uintptr_t)(image + sites[i] + 5);
+        if (delta < INT32_MIN || delta > INT32_MAX) {
+            printf("Automatic QTE: %s prompts unavailable (hook outside relative-jump range)\n", names[i]);
+            sites[i] = UINT64_MAX;
+            continue;
+        }
+        relative[i] = (int32_t)delta;
+        const uintptr_t resume = (uintptr_t)(image + sites[i] + lengths[i]);
+        /* The sites are in SPARTAN_QTE_COUNT_* order: each stub counts its kind's frames. */
+        const uintptr_t frames = (uintptr_t)&state->kinds[i];
+        if (i == 0) spartanport_qte_build_timed_stub(stub, frames, automatic, resume);
+        else if (i == 1) spartanport_qte_build_repeat_stub(stub, frames, automatic,
+                                                    (uintptr_t)(image + spartanport_qte_call_target(image + sites[i], sites[i])));
+        else if (i == 2) spartanport_qte_build_charged_stub(stub, frames, automatic, resume);
+        else spartanport_qte_build_circle_stub(stub, frames, automatic, resume,
+                                        (uintptr_t)(image + sites[i] + SPARTAN_QTE_CIRCLE_SKIP));
+    }
+    protect(stubs, page_size, 5);
+    for (unsigned i = 0; i < AUTO_QTE_SITES; ++i) {
+        if (sites[i] == UINT64_MAX) continue;
+        image[sites[i]] = i == 1 ? 0xe8 : 0xe9;  /* the repeat site stays a call */
+        memcpy(image + sites[i] + 1, &relative[i], 4);
+        memset(image + sites[i] + 5, 0x90, lengths[i] - 5);
+        ++ready;
+    }
+    if (!ready && !rotation) return;
+    spartanport_qte_status(1);
+    printf("Automatic QTE: ready for %d of %d prompt kinds (menu, Game)\n", ready + rotation, AUTO_QTE_SITES + 1);
+}
+
+/* Switch attacks (src/switch_hook.h): L1 + a d-pad direction and L1 + Cross take the branches to
+ * the switch attacks. Installed only with SPARTAN_SWITCH_ATTACKS=1; all three or none. */
+static void install_switch_hooks(Segment *segments, uint64_t count, uint64_t size) {
+    const char *setting = getenv("SPARTAN_SWITCH_ATTACKS");
+    if (!setting || strcmp(setting, "1")) return;
+    uint64_t sites[SPARTAN_SWITCH_SITES];
+    for (unsigned i = 0; i < SPARTAN_SWITCH_SITES; ++i) {
+        const SpartanSwitchSite *site = &spartanport_switch_sites[i];
+        sites[i] = spartanport_signature_find(image, size, &site->site);
+        if (sites[i] == UINT64_MAX || !mapped(segments, count, sites[i], site->length) ||
+            memcmp(image + sites[i], site->original, site->length)) {
+            printf("Switch attacks: unavailable (%s not found in this eboot.bin)\n", site->name);
+            return;
+        }
+    }
+    const uint64_t pass_at = spartanport_signature_find(image, size, &spartanport_switch_pass_site);
+    const uint64_t caller = spartanport_signature_find(image, size, &spartanport_switch_caller_site);
+    if (pass_at == UINT64_MAX || caller == UINT64_MAX || !mapped(segments, count, pass_at - 1, 5)) {
+        printf("Switch attacks: unavailable (input check not found in this eboot.bin)\n");
+        return;
+    }
+    int32_t pass_rel;
+    memcpy(&pass_rel, image + pass_at, 4);
+    const uint64_t pass = pass_at + 4 + (int64_t)pass_rel;
+    const size_t stub_size = round_page(SPARTAN_SWITCH_SITES * SPARTAN_SWITCH_SLOT);
+    unsigned char *stubs = allocate(stub_size);
+    int32_t relative[SPARTAN_SWITCH_SITES];
+    for (unsigned i = 0; i < SPARTAN_SWITCH_SITES; ++i) {
+        const int64_t delta = (int64_t)(uintptr_t)(stubs + i * SPARTAN_SWITCH_SLOT) -
+                              (int64_t)(uintptr_t)(image + sites[i] + 5);
+        if (delta < INT32_MIN || delta > INT32_MAX) {
+            printf("Switch attacks: unavailable (hook outside relative-jump range)\n");
+            return;
+        }
+        relative[i] = (int32_t)delta;
+    }
+    ((SpartanSwitchState *)spartanport_switch_state_address())->caller = (uint64_t)(uintptr_t)(image + caller);
+    const uintptr_t calls[SPARTAN_SWITCH_SITES] = {(uintptr_t)&spartanport_switch_input, (uintptr_t)&spartanport_switch_queue, 0};
+    for (unsigned i = 0; i < SPARTAN_SWITCH_SITES; ++i)
+        spartanport_switch_build_stub(stubs + i * SPARTAN_SWITCH_SLOT, &spartanport_switch_sites[i], spartanport_switch_state_address(),
+                               calls[i], (uintptr_t)(image + pass),
+                               (uintptr_t)(image + sites[i] + spartanport_switch_sites[i].length));
+    protect(stubs, stub_size, 5);
+    for (unsigned i = 0; i < SPARTAN_SWITCH_SITES; ++i) {
+        image[sites[i]] = 0xe9;
+        memcpy(image + sites[i] + 1, &relative[i], 4);
+        memset(image + sites[i] + 5, 0x90, spartanport_switch_sites[i].length - 5);
+    }
+    spartanport_switch_status(1);
+    printf("Switch attacks: hooks ready (input check 0x%llx, input queue 0x%llx, d-pad select 0x%llx)\n",
+           (unsigned long long)sites[0], (unsigned long long)sites[1], (unsigned long long)sites[2]);
 }
 
 static void install_orb_multiplier(Segment *segments, uint64_t count, uint64_t size) {
     uint64_t calls[3];
-    const uint64_t setter_at = gow3_orb_find(image, size, calls);
+    const uint64_t setter_at = spartanport_orb_find(image, size, calls);
     if (setter_at == UINT64_MAX) {
         printf("Red orbs: multiplier unavailable (code not found in this eboot.bin)\n");
         return;
@@ -545,9 +772,9 @@ static void install_orb_multiplier(Segment *segments, uint64_t count, uint64_t s
     /* SysV call sites: preserve the receiver across the helper, then tail-call the original
      * setter. Its cap and upgrade notifications remain in the game's own code. */
     unsigned char *stub = allocate(page_size);
-    uintptr_t helper = (uintptr_t)gow3_orbs_gain, setter = (uintptr_t)(image + setter_at);
+    uintptr_t helper = (uintptr_t)spartanport_orbs_gain, setter = (uintptr_t)(image + setter_at);
     unsigned char code[26];
-    gow3_orb_build_stub(code, helper, setter);
+    spartanport_orb_build_stub(code, helper, setter);
     int32_t displacements[3];
     for (unsigned i = 0; i < 3; ++i) {
         int64_t delta = (int64_t)(uintptr_t)stub - (int64_t)(uintptr_t)(image + calls[i] + 5);
@@ -561,7 +788,7 @@ static void install_orb_multiplier(Segment *segments, uint64_t count, uint64_t s
     protect(stub, page_size, 5);
     for (unsigned i = 0; i < 3; ++i)
         memcpy(image + calls[i] + 1, &displacements[i], 4);
-    gow3_orbs_status(1);
+    spartanport_orbs_status(1);
     printf("Red orbs: live multiplier ready (3 validated gain paths, 0.1x to 100x)\n");
 }
 /* Writes a jump from image+at to `stub`; the rest of the replaced bytes become nops (the stub
@@ -579,28 +806,74 @@ static int install_jump(uint64_t at, unsigned length, unsigned char *stub) {
 /* Damage dealt/taken and green/blue/gold orb multipliers (src/damage_hook.h, src/orb_hook.h):
  * the stubs read the menu's floats directly, so changes apply on the next hit or pickup. */
 static void install_stat_multipliers(Segment *segments, uint64_t count, uint64_t size) {
-    const uint64_t damage_at = gow3_signature_find(image, size, &gow3_damage_site);
-    const uint64_t pickup_at = gow3_signature_find(image, size, &gow3_orb_pickup_site);
-    int damage = damage_at != UINT64_MAX && mapped(segments, count, damage_at, GOW3_DAMAGE_HOOK_LENGTH) &&
-                 gow3_damage_signature_match(image + damage_at, size - damage_at);
-    int pickup = pickup_at != UINT64_MAX && mapped(segments, count, pickup_at, GOW3_ORB_PICKUP_LENGTH) &&
-                 gow3_orb_pickup_signature_match(image + pickup_at, size - pickup_at);
+    const uint64_t damage_at = spartanport_signature_find(image, size, &spartanport_damage_site);
+    const uint64_t pickup_at = spartanport_signature_find(image, size, &spartanport_orb_pickup_site);
+    int damage = damage_at != UINT64_MAX && mapped(segments, count, damage_at, SPARTAN_DAMAGE_HOOK_LENGTH) &&
+                 spartanport_damage_signature_match(image + damage_at, size - damage_at);
+    int pickup = pickup_at != UINT64_MAX && mapped(segments, count, pickup_at, SPARTAN_ORB_PICKUP_LENGTH) &&
+                 spartanport_orb_pickup_signature_match(image + pickup_at, size - pickup_at);
     unsigned char *stubs = damage || pickup ? allocate(page_size) : NULL;
     if (damage) {
-        gow3_damage_build_stub(stubs, gow3_damage_multiplier(1), gow3_damage_multiplier(0),
-                               (uintptr_t)(image + damage_at + GOW3_DAMAGE_HOOK_LENGTH));
+        spartanport_damage_build_stub(stubs, spartanport_damage_multiplier(1), spartanport_damage_multiplier(0),
+                               (uintptr_t)(image + damage_at + SPARTAN_DAMAGE_HOOK_LENGTH));
     }
     if (pickup) {
-        gow3_orb_pickup_build_stub(stubs + 256, gow3_orb_pickup_multiplier(0), gow3_orb_pickup_multiplier(1),
-                                   gow3_orb_pickup_multiplier(2),
-                                   (uintptr_t)(image + pickup_at + GOW3_ORB_PICKUP_LENGTH));
+        spartanport_orb_pickup_build_stub(stubs + 256, spartanport_orb_pickup_multiplier(0), spartanport_orb_pickup_multiplier(1),
+                                   spartanport_orb_pickup_multiplier(2),
+                                   (uintptr_t)(image + pickup_at + SPARTAN_ORB_PICKUP_LENGTH));
     }
     if (stubs) protect(stubs, page_size, 5);
-    damage = damage && install_jump(damage_at, GOW3_DAMAGE_HOOK_LENGTH, stubs);
-    pickup = pickup && install_jump(pickup_at, GOW3_ORB_PICKUP_LENGTH, stubs + 256);
-    gow3_stat_multipliers_status(damage, pickup);
+    damage = damage && install_jump(damage_at, SPARTAN_DAMAGE_HOOK_LENGTH, stubs);
+    pickup = pickup && install_jump(pickup_at, SPARTAN_ORB_PICKUP_LENGTH, stubs + 256);
+    spartanport_stat_multipliers_status(damage, pickup);
     printf("Multipliers: damage %s, green/blue/gold orbs %s\n", damage ? "ready" : "unavailable",
            pickup ? "ready" : "unavailable");
+}
+/* Options > Graphics (src/graphics_hook.h): bloom and motion blur, toggled live through bytes the
+ * settings own. A site whose code does not match leaves its row "Unavailable". */
+extern uintptr_t spartanport_graphics_flag(unsigned id);
+extern void spartanport_graphics_status(unsigned id);
+static void install_graphics(Segment *segments, uint64_t count, uint64_t size) {
+    const uint64_t blur_at = spartanport_signature_find(image, size, &spartanport_motion_blur_site);
+    const uint64_t bloom_at = spartanport_signature_find(image, size, &spartanport_bloom_site);
+    const uint64_t shadows_at = spartanport_signature_find(image, size, &spartanport_shadows_site);
+    /* Same prologue bytes as the motion blur site. */
+    int shadows = shadows_at != UINT64_MAX && mapped(segments, count, shadows_at, SPARTAN_SHADOWS_HOOK_LENGTH) &&
+                  spartanport_motion_blur_signature_match(image + shadows_at, size - shadows_at);
+    int blur = blur_at != UINT64_MAX && mapped(segments, count, blur_at, 48) &&
+               spartanport_motion_blur_signature_match(image + blur_at, size - blur_at);
+    int bloom = bloom_at != UINT64_MAX && mapped(segments, count, bloom_at, SPARTAN_BLOOM_HOOK_LENGTH) &&
+                spartanport_bloom_signature_match(image + bloom_at, size - bloom_at);
+    uint64_t gate = 0, queued = 0;
+    if (blur) {
+        gate = spartanport_rip_target(image, blur_at + SPARTAN_MOTION_BLUR_GATE);
+        queued = spartanport_rip_target(image, blur_at + SPARTAN_MOTION_BLUR_QUEUED);
+        blur = mapped(segments, count, gate, 4) && mapped(segments, count, queued, 4);
+    }
+    if (!blur && !bloom && !shadows) {
+        puts("Graphics: bloom, motion blur and shadows toggles unavailable (code not found in this eboot.bin)");
+        return;
+    }
+    unsigned char *stubs = allocate(page_size);
+    if (blur)
+        spartanport_motion_blur_build_stub(stubs, spartanport_graphics_flag(SPARTAN_GRAPHICS_MOTION_BLUR),
+                                           (uintptr_t)(image + gate), (uintptr_t)(image + queued),
+                                           (uintptr_t)(image + blur_at + SPARTAN_MOTION_BLUR_HOOK_LENGTH));
+    if (bloom)
+        spartanport_bloom_build_stub(stubs + 256, spartanport_graphics_flag(SPARTAN_GRAPHICS_BLOOM),
+                                     (uintptr_t)(image + bloom_at + SPARTAN_BLOOM_HOOK_LENGTH));
+    if (shadows)
+        spartanport_shadows_build_stub(stubs + 768, spartanport_graphics_flag(SPARTAN_GRAPHICS_SHADOWS),
+                                       (uintptr_t)(image + shadows_at + SPARTAN_SHADOWS_HOOK_LENGTH));
+    protect(stubs, page_size, 5);
+    blur = blur && install_jump(blur_at, SPARTAN_MOTION_BLUR_HOOK_LENGTH, stubs);
+    bloom = bloom && install_jump(bloom_at, SPARTAN_BLOOM_HOOK_LENGTH, stubs + 256);
+    shadows = shadows && install_jump(shadows_at, SPARTAN_SHADOWS_HOOK_LENGTH, stubs + 768);
+    if (blur) spartanport_graphics_status(SPARTAN_GRAPHICS_MOTION_BLUR);
+    if (bloom) spartanport_graphics_status(SPARTAN_GRAPHICS_BLOOM);
+    if (shadows) spartanport_graphics_status(SPARTAN_GRAPHICS_SHADOWS);
+    printf("Graphics: bloom toggle %s, motion blur toggle %s, shadows toggle %s\n", bloom ? "ready" : "unavailable",
+           blur ? "ready" : "unavailable", shadows ? "ready" : "unavailable");
 }
 /* The pause menu's "Exit to Desktop" row (src/menu_hook.h). Ends the process as the restart
  * does: GPU, audio and guest threads are still running, so no destructors. */
@@ -612,19 +885,30 @@ static void menu_quit(void) {
 #endif
     _exit(0);
 }
+/* Same provider ABI as the interpreter's original vtable call. No VM arguments are consumed. */
+static void ABI menu_setting(void *self, uint16_t function, uint64_t *result, void *args) {
+    (void)self;
+    (void)args;
+    *result = function >= 0xffd ? (uint64_t)spartanportgpu_enemy_health_bar(function == 0xffd)
+                              : spartanportgpu_native_setting(function);
+    if (function == 0xfcb && *result) runtime_restart();
+}
+static const uintptr_t menu_vtable[4] = {0, 0, 0, (uintptr_t)menu_setting};
+static const uintptr_t *menu_provider = menu_vtable;
 /* The row comes with the hook: its copy of R_UI.WAD (scripts/pause_menu.py) is mounted over the
  * game's, and over the glyphs' copy it was made from, only once the hook is in. */
 static void install_menu_exit(Segment *segments, uint64_t count, uint64_t size, const char *wad) {
-    const uint64_t at = gow3_signature_find(image, size, &gow3_menu_site);
-    if (at == UINT64_MAX || !mapped(segments, count, at, GOW3_MENU_HOOK_LENGTH) ||
-        !gow3_menu_signature_match(image + at, size - at)) {
+    const uint64_t at = spartanport_signature_find(image, size, &spartanport_menu_site);
+    if (at == UINT64_MAX || !mapped(segments, count, at, SPARTAN_MENU_HOOK_LENGTH) ||
+        !spartanport_menu_signature_match(image + at, size - at)) {
         printf("Pause menu: Exit to Desktop unavailable (code not found in this eboot.bin)\n");
         return;
     }
     unsigned char *stub = allocate(page_size);
-    gow3_menu_build_stub(stub, (uintptr_t)menu_quit, (uintptr_t)(image + at + GOW3_MENU_HOOK_LENGTH));
+    spartanport_menu_build_stub(stub, (uintptr_t)menu_quit, (uintptr_t)(image + at + SPARTAN_MENU_HOOK_LENGTH),
+                               (uintptr_t)&menu_provider);
     protect(stub, page_size, 5);
-    if (!install_jump(at, GOW3_MENU_HOOK_LENGTH, stub)) {
+    if (!install_jump(at, SPARTAN_MENU_HOOK_LENGTH, stub)) {
         puts("Pause menu: Exit to Desktop unavailable (hook outside relative-jump range)");
         return;
     }
@@ -673,10 +957,10 @@ static void apply_patches(const char *path, Segment *segments, uint64_t ns, cons
 void runtime_restart(void) {
     fflush(NULL);
 #ifdef _WIN32
-    /* run.py sets GOW3_RESTART_COMMAND: the launch command line, started again (new patches). */
-    const char *command=getenv("GOW3_RESTART_COMMAND");
+    /* run.py sets SPARTAN_RESTART_COMMAND: the launch command line, started again (new patches). */
+    const char *command=getenv("SPARTAN_RESTART_COMMAND");
     puts("Runtime: restarting through run.py");
-    if (!command || !*command) { fputs("runtime_restart: GOW3_RESTART_COMMAND is not set\n",stderr); _exit(1); }
+    if (!command || !*command) { fputs("runtime_restart: SPARTAN_RESTART_COMMAND is not set\n",stderr); _exit(1); }
     char *line=_strdup(command);
     /* Same output handles: a launcher reading the game's log keeps reading the new launch. */
     STARTUPINFOA startup={.cb=sizeof(startup),.dwFlags=STARTF_USESTDHANDLES,
@@ -690,10 +974,10 @@ void runtime_restart(void) {
     /* The new launch waits for this process's GPU device to go away (run.py --after). */
     TerminateProcess(GetCurrentProcess(),0);
 #else
-    const char *command = getenv("GOW3_RESTART_COMMAND");
+    const char *command = getenv("SPARTAN_RESTART_COMMAND");
     syscall(SYS_close_range, 3u, ~0u, 0u);
     if (command && *command) {
-        puts("Runtime: restarting through GOW3_RESTART_COMMAND");
+        puts("Runtime: restarting through SPARTAN_RESTART_COMMAND");
         execl("/bin/sh", "sh", "-c", command, (char *)NULL);
     } else {
         puts("Runtime: restarting through run.sh");
@@ -704,12 +988,12 @@ void runtime_restart(void) {
 #endif
 }
 
-/* The guest code needs the PS4's instruction sets (#33, #66); GOW3_CPU_CHECK=0 skips this. A
+/* The guest code needs the PS4's instruction sets (#33, #66); SPARTAN_CPU_CHECK=0 skips this. A
  * missing fatal set prints STOP and returns 0; the rewritable ones go to cpu_missing_sets, named
  * in missing. */
 static int cpu_supported(char *missing, size_t size) {
     missing[0] = 0;
-    const char *check = getenv("GOW3_CPU_CHECK");
+    const char *check = getenv("SPARTAN_CPU_CHECK");
     if (check && !strcmp(check, "0")) return 1;
     const CpuFeatureWords words = cpu_feature_words();
     if (cpu_missing_fatal(words, missing, size)) {
@@ -719,6 +1003,56 @@ static int cpu_supported(char *missing, size_t size) {
     }
     cpu_missing_sets = cpu_missing_rewritable(words, missing, size);
     return 1;
+}
+
+/* --displays: the monitors a launcher can offer, one TSV line each on stdout so a machine can parse
+ * them: index, name, primary, x, y, width, height. The index is the position in SDL_GetDisplays(),
+ * the same value SPARTAN_MONITOR carries; SDL_DisplayID is per process and never printed. TAB, CR and
+ * LF in a name would break the columns or the lines, so they are printed as spaces. Diagnostics go
+ * to stderr and stdout stays empty when the enumeration fails. */
+static int describe_displays(void) {
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "Displays: cannot initialize SDL video: %s\n", SDL_GetError());
+        return 1;
+    }
+    int count = 0;
+    SDL_DisplayID *displays = SDL_GetDisplays(&count);
+    if (!displays) {
+        fprintf(stderr, "Displays: cannot enumerate displays: %s\n", SDL_GetError());
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return 1;
+    }
+    if (count == 0) {
+        /* A valid enumeration with no monitors is not a failure: no line, no error code. */
+        fprintf(stderr, "Displays: none\n");
+        SDL_free(displays);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return 0;
+    }
+    /* 0 when SDL cannot tell: no display matches, so no line claims to be the primary. */
+    const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
+    if (!primary) fprintf(stderr, "Displays: no primary display reported: %s\n", SDL_GetError());
+    for (int i = 0; i < count; ++i) {
+        SDL_Rect bounds;
+        if (!SDL_GetDisplayBounds(displays[i], &bounds)) {
+            /* Reported and left out: a line with invented geometry would lie to the launcher. */
+            fprintf(stderr, "Displays: display %d has no bounds: %s\n", i, SDL_GetError());
+            continue;
+        }
+        const char *name = SDL_GetDisplayName(displays[i]);
+        char fallback[32];
+        if (!name || !name[0]) {
+            snprintf(fallback, sizeof(fallback), "Display %d", i);
+            name = fallback;
+        }
+        printf("%d\t", i);
+        for (const char *at = name; *at; ++at)
+            putchar(*at == '\t' || *at == '\r' || *at == '\n' ? ' ' : *at);
+        printf("\t%d\t%d\t%d\t%d\t%d\n", displays[i] == primary, bounds.x, bounds.y, bounds.w, bounds.h);
+    }
+    SDL_free(displays);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -742,6 +1076,10 @@ int main(int argc, char **argv) {
         runtime_pad_describe();
         return 0;
     }
+    if (argc == 2 && !strcmp(argv[1], "--displays")) {
+        /* Before the memory reservation: this only asks SDL, nothing of the game is set up yet. */
+        return describe_displays();
+    }
 #ifdef _WIN32
     /* The PS4 user range must stay free of host allocations (GPU driver, heaps), and the guest
      * TCB needs one of the 64 TEB TLS slots before DLLs (Vulkan drivers) take them. */
@@ -751,7 +1089,7 @@ int main(int argc, char **argv) {
     int cpu_only = 0, strict_imports = 0, check_imports = 0;
     unsigned timeout_seconds = 10;
     const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL, *isa_file=NULL, *pause_menu=NULL;
-    const char *mounts[8]; int mount_count=0;
+    const char *mounts[24]; int mount_count=0;  /* glyphs (3) and the switch attack tutorials (16) */
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "--cpu-only")) cpu_only = 1;
         else if (!strcmp(argv[i], "--strict-imports")) strict_imports = 1;
@@ -765,23 +1103,23 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--mount") && i+1<argc) {
             /* guest=host; the guest part never has '=', so the first one splits */
             const char *spec=argv[++i], *eq=strchr(spec,'=');
-            if (mount_count==8 || !eq || eq==spec || !eq[1]) { fprintf(stderr, "Bad --mount (guest=host, at most 8): %s\n", spec); return 1; }
+            if (mount_count==24 || !eq || eq==spec || !eq[1]) { fprintf(stderr, "Bad --mount (guest=host, at most 24): %s\n", spec); return 1; }
             mounts[mount_count++]=spec;
         }
         else if (!strcmp(argv[i], "--timeout") && i+1<argc) timeout_seconds=(unsigned)strtoul(argv[++i],NULL,10);
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s boot.bin [--cpu-only] [--strict-imports] [--check-imports] [--content-profile file] [--app0 dir] [--user dir] [--patches file] [--isa-rewrite file] [--pause-menu R_UI.WAD] [--mount guest=host]... [--timeout seconds] | --vulkan-only | --cpu-features | --gamepad\n", argv[0]);
+        fprintf(stderr, "Usage: %s boot.bin [--cpu-only] [--strict-imports] [--check-imports] [--content-profile file] [--app0 dir] [--user dir] [--patches file] [--isa-rewrite file] [--pause-menu R_UI.WAD] [--mount guest=host]... [--timeout seconds] | --vulkan-only | --cpu-features | --gamepad | --displays\n", argv[0]);
         return 1;
     }
     if (!cpu_supported(missing, sizeof missing)) return 20;
     if (cpu_missing_sets) printf("CPU: missing %s\n", missing);
-    /* GOW3_ISA_REWRITE=0 never rewrites, =1 rewrites every site; by default the sets the CPU lacks. */
-    const char *policy = getenv("GOW3_ISA_REWRITE");
+    /* SPARTAN_ISA_REWRITE=0 never rewrites, =1 rewrites every site; by default the sets the CPU lacks. */
+    const char *policy = getenv("SPARTAN_ISA_REWRITE");
     unsigned isa_sets = policy && !strcmp(policy, "1") ? 0xffffffffu : policy && !strcmp(policy, "0") ? 0 : cpu_missing_sets;
     if (cpu_missing_sets && !isa_sets) {
-        printf("STOP: this CPU lacks %s and the rewrite is disabled (GOW3_ISA_REWRITE=0)\n", missing);
+        printf("STOP: this CPU lacks %s and the rewrite is disabled (SPARTAN_ISA_REWRITE=0)\n", missing);
         return 20;
     }
     if (cpu_missing_sets && !isa_file) {
@@ -803,6 +1141,13 @@ int main(int argc, char **argv) {
     }
     if (app0) {
         runtime_file_configure(app0, user_dir ? user_dir : "user");
+        if (user_dir && user_dir[0]) {
+#ifdef _WIN32
+            _putenv_s("SPARTAN_USER_DIR", user_dir);
+#else
+            setenv("SPARTAN_USER_DIR", user_dir, 1);
+#endif
+        }
         for (int i = 0; i < mount_count; ++i) {
             const char *eq = strchr(mounts[i], '=');
             char guest[64];
@@ -817,17 +1162,17 @@ int main(int argc, char **argv) {
         if (sfo_value(sfo,"INSTALL_DIR_SAVEDATA",id,sizeof(id),NULL) || sfo_value(sfo,"TITLE_ID",id,sizeof(id),NULL))
             runtime_savedata_configure(id);
     }
-    gow3gpu_register_kernel();
+    spartanportgpu_register_kernel();
 #ifdef _WIN32
     SYSTEM_INFO system_info; GetSystemInfo(&system_info); page_size = system_info.dwPageSize;
     AddVectoredExceptionHandler(1, vectored_fault);
     SetUnhandledExceptionFilter(unhandled_fault);
-    if (getenv("GOW3_STRICT_HANDLES")) {
+    if (getenv("SPARTAN_STRICT_HANDLES")) {
         PROCESS_MITIGATION_STRICT_HANDLE_CHECK_POLICY strict={0};
         strict.RaiseExceptionOnInvalidHandleReference=1;
         strict.HandleExceptionsPermanentlyEnabled=1;
         if (!SetProcessMitigationPolicy(ProcessStrictHandleCheckPolicy,&strict,sizeof(strict)))
-            fprintf(stderr,"GOW3_STRICT_HANDLES: policy not set (%lu)\n",GetLastError());
+            fprintf(stderr,"SPARTAN_STRICT_HANDLES: policy not set (%lu)\n",GetLastError());
     }
     (void)timeout_seconds; /* no watchdog on Windows */
 #else
@@ -950,12 +1295,13 @@ int main(int argc, char **argv) {
     unsigned char *stubs = image + round_page(size);
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
+    find_save_preview(segments,ns,size);
     if (isa_table && isa_table_matches(isa_table, image, size)) {
         printf("STOP: this CPU lacks %s and no rewrite table matches the image\n", missing);
         return 20;
     }
     if (!cpu_only) {
-        char title[128]="God of War III", serial[16]="UNKNOWN", sfo[4096];
+        char title[128]="SpartanPort", serial[16]="UNKNOWN", sfo[4096];
         uint32_t attributes=0;
         snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0 ? app0 : ".");
         sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
@@ -963,10 +1309,10 @@ int main(int argc, char **argv) {
         sfo_value(sfo,"ATTRIBUTE",NULL,0,&attributes);
         uint64_t sdk=0;
         if (procparam) memcpy(&sdk,image+procparam+16,8); /* procparam: size, magic, count, sdk_version */
-        Gow3GpuConfig gpu={title,serial,user_dir ? user_dir : "user",(uint32_t)sdk,attributes,1920,1080};
+        SpartanGpuConfig gpu={title,serial,user_dir ? user_dir : "user",(uint32_t)sdk,attributes,1920,1080};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
-        if (gow3gpu_init(&gpu)) fail("GPU initialization failed");
-        printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,gow3gpu_symbol_count());
+        if (spartanportgpu_init(&gpu)) fail("GPU initialization failed");
+        printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,spartanportgpu_symbol_count());
     }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);
@@ -1018,9 +1364,14 @@ int main(int argc, char **argv) {
     if (gpu_enabled) install_orb_multiplier(segments, ns, size);
     if (gpu_enabled) install_cheats(segments, ns, size);
     if (gpu_enabled) find_engine_fps(segments, ns, size);
+    if (gpu_enabled) find_power_up_menu(segments, ns, size);
     if (gpu_enabled) install_actor_watch(segments, ns, size);
+    if (gpu_enabled) install_player_hook(segments, ns, size);
+    if (gpu_enabled) install_wall_seam_fix(segments, ns, size);
     if (gpu_enabled) install_stat_multipliers(segments, ns, size);
-    if (gpu_enabled) install_qte_hooks(segments, ns, size);
+    if (gpu_enabled) install_graphics(segments, ns, size);
+    if (gpu_enabled) install_auto_qte_hooks(segments, ns, size, install_qte_hooks(segments, ns, size));
+    if (gpu_enabled) install_switch_hooks(segments, ns, size);
     if (gpu_enabled && pause_menu && app0) install_menu_exit(segments, ns, size, pause_menu);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
@@ -1032,12 +1383,12 @@ int main(int argc, char **argv) {
             fflush(NULL);
             _exit(20); /* no destructors: GPU threads are running */
         }
-        if (isa_sets == 0xffffffffu) printf("ISA: forced rewrite of all %u sites (GOW3_ISA_REWRITE=1), %u skipped\n", r.rewritten, r.skipped);
+        if (isa_sets == 0xffffffffu) printf("ISA: forced rewrite of all %u sites (SPARTAN_ISA_REWRITE=1), %u skipped\n", r.rewritten, r.skipped);
         else printf("ISA: CPU lacks %s: %u sites rewritten (%u jmp, %u relocated, %u int3), %u skipped\n",
                     missing, r.rewritten, r.jmp, r.relocated, r.int3, r.skipped);
-        runtime_set_report_hook(isa_report_hook);
         protect(stubs, stub_area, 5);
     }
+    runtime_set_report_hook(loader_report_hook);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
     int executable_entry = 0;
@@ -1049,6 +1400,7 @@ int main(int argc, char **argv) {
     if (!executable_entry) fail("entry is not executable");
     printf("Mapped %" PRIu64 " bytes, %" PRIu64 " segments; applied %" PRIu64 " relocations\n", size, ns, nr);
     publish_engine_fps();
+    publish_power_up_menu();
     if (native_libc) {
         for (uint64_t m=0;m<module_count;++m) {
             int init_executable=0;
@@ -1060,6 +1412,7 @@ int main(int argc, char **argv) {
         }
         runtime_set_main_tls(image+main_tls[0],main_tls[1],main_tls[2],main_tls[3]);
         runtime_thread_attach_main();
+        runtime_orbis_fpu(); /* the PS4's floating-point state from the first guest code on */
         runtime_set_procparam(image+procparam);
         /* Dependencies start in link order (libc first), as the PS4 dynamic linker does. */
         for (uint64_t m=0;m<module_count;++m) {

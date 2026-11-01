@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Startup graphics options of gow3.ini (gpu/shim/gow3_graphics.h) for run.py.
+"""Startup graphics options of spartanport.ini (gpu/shim/spartanport_graphics.h) for run.py.
 
 The in-game menu and the launcher write them; run.py turns them into game patches and
 environment variables at every start, so "Apply and restart" uses the new values. After a
@@ -16,16 +16,40 @@ RESOLUTIONS = ('native', '480p', '720p', '900p', '1440p', '1800p', '4K',
                '1440x900', '1360x768',
                '1280x960', '1440x1080', '1920x1440', '2048x1536', '2560x1920',
                '5120x2160', '8K')
-# The ultrawide, 16:10 and 4:3 sizes of the Ultrawide mod (#202), built in: beta until more players confirm
-# them, except the ones tested in game. 8K remains beta pending full-game stability testing.
-TESTED_RESOLUTIONS = ('1280x800', '1440x900', '1360x768', '1280x960')
+# The ultrawide, 16:10 and 4:3 sizes of the Ultrawide mod (#202), built in: beta until more screens confirm
+# them, except the ones tested in game (the maintainer's own tests and players' reports in issues #180, #505
+# and #519): 2560x1080, 1440x1080, 2048x1536, 2560x1920 and 8K are still beta.
+TESTED_RESOLUTIONS = ('3440x1440', '3840x1600', '5120x1440', '5120x2160', '1920x1200', '2560x1600', '1280x800',
+                      '1440x900', '1360x768', '1280x960', '1920x1440')
 BETA_RESOLUTIONS = tuple(r for r in RESOLUTIONS[7:] if r not in TESTED_RESOLUTIONS)
 SIZES = {'native': (1920, 1080), '480p': (854, 480), '720p': (1280, 720), '900p': (1600, 900),
          '1440p': (2560, 1440), '1800p': (3200, 1800), '4K': (3840, 2160), '8K': (7680, 4320)}
 ASPECTS = (('16:9', 16 / 9), ('16:10', 16 / 10), ('21:9', 2.37), ('32:9', 32 / 9), ('4:3', 4 / 3))
-ENGINE_FPS = (60, 100, 120, 240)
-DEFAULTS = {'render_resolution': 'native', 'engine_fps': '120', 'deferred_readback': '1',
-            'stale_readback': '1', 'async_shaders': '1'}
+ENGINE_FPS = (60, 100, 120, 144, 180, 240)
+# The Steam Deck's DMI names: LCD (Jupiter) and OLED (Galileo), both with a 1280 × 800 screen (#855).
+STEAM_DECK_PRODUCTS = ('Jupiter', 'Galileo')
+STEAM_DECK_RESOLUTION = '1280x800'
+
+
+def steam_deck(dmi=Path('/sys/devices/virtual/dmi/id')):
+    """True on a Steam Deck running Linux (SteamOS or another distribution), from its DMI names."""
+    try:
+        vendor = (dmi / 'sys_vendor').read_text(encoding='utf-8').strip()
+        product = (dmi / 'product_name').read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        return False
+    return vendor == 'Valve' and product in STEAM_DECK_PRODUCTS
+
+
+def default_render_resolution(dmi=Path('/sys/devices/virtual/dmi/id')):
+    """The render resolution before the player chooses one: the Steam Deck's own screen, or native.
+    A choice saved in spartanport.ini always wins, so this only changes a first start."""
+    return STEAM_DECK_RESOLUTION if steam_deck(dmi) else 'native'
+
+
+DEFAULTS = {'render_resolution': default_render_resolution(), 'engine_fps': '120', 'deferred_readback': '1',
+            'stale_readback': '1', 'async_shaders': '1', 'monitor': '', 'hdr': '0',
+            'glyph_style': 'off', 'anisotropy': '0'}
 RESOLUTION_PREFIX = 'Resolution Patch'
 FPS_PREFIX = 'Frame Rate Patch'
 TEXTURE_FIX = 'Bug Fix - Texture Corruption Fix'
@@ -50,7 +74,7 @@ def write_keys(path, updates):
     try:
         lines = path.read_text(encoding='utf-8').splitlines()
     except OSError:
-        lines = ['# gow3 settings (in-game menu: Insert / R3+L2)']
+        lines = ['# spartanport settings (in-game menu: Insert / R3+L2)']
     done, out = set(), []
     for line in lines:
         key = line.split('=', 1)[0].strip() if '=' in line and not line.lstrip().startswith('#') else None
@@ -77,6 +101,64 @@ def aspect_name(width, height):
     divisor = math.gcd(width, height)
     return f'{width // divisor}:{height // divisor}'
 
+
+
+# Temporal upscaler presets (spartanport.ini preset=, gpu/shim/spartanport_settings.h Preset): render
+# scale per axis. Native AA keeps the game's size; Ultra Quality (1.3x, FSR 1's name) is appended.
+PRESET_SCALES = (1.0, 1.5, 1.7, 2.0, 3.0, 1.3)
+
+
+def upscale_render_size(preset, output):
+    """The game's render size for an upscaler preset and output size: even, from 640x360 to 7680x4320.
+    Never the game's own 1920x1080 nor the output size (Native AA): at that size the game composites
+    straight into the display buffer, before the upscaler can run, so it is 2 pixels short instead.
+    None for an unknown preset."""
+    try:
+        scale = PRESET_SCALES[int(preset)]
+    except (ValueError, TypeError, IndexError):
+        return None
+    even = lambda value: 2 * round(value / 2)
+    size = (min(max(even(output[0] / scale), 640), 7680), min(max(even(output[1] / scale), 360), 4320))
+    if size in (tuple(output), SIZES['native']):
+        size = (size[0] - 2, size[1] - 2)
+    return size
+
+
+# The built-in resolution patches a render size is made from, smallest first, with the largest size
+# each covers: the Video Arena (0x7cd918) and the passes the game sizes at 1080p grow with them.
+PATCH_TEMPLATES = (('720p', (1280, 720), (1920, 1080)), ('1440p', (2560, 1440), (2560, 1440)),
+                   ('4K', (3840, 2160), (3840, 2160)), ('8K', (7680, 4320), (7680, 4320)))
+
+
+def resolution_patch_xml(width, height, source=Path(__file__).resolve().parents[1] / 'patches' / 'CUSA01623.xml'):
+    """A "Resolution Patch - <width>x<height>" patch file: the smallest built-in resolution patch that
+    fits the size, with its sizes and half sizes (bloom) replaced."""
+    import re
+    name, (tw, th), _ = next((t for t in PATCH_TEMPLATES if width <= t[2][0] and height <= t[2][1]),
+                             PATCH_TEMPLATES[-1])
+    text = Path(source).read_text(encoding='utf-8')
+    block = re.search(rf'<Metadata [^>]*Name="Resolution Patch - {name}".*?</Metadata>', text, re.S).group(0)
+    le = lambda value, size: value.to_bytes(size, 'little').hex()
+    values = {le(tw, 4): le(width, 4), le(th, 4): le(height, 4), le(tw, 2): le(width, 2),
+              le(th, 2): le(height, 2), le(tw // 2, 4): le(width // 2, 4), le(th // 2, 4): le(height // 2, 4)}
+    block = re.sub(r'Value="([0-9a-f]+)"', lambda m: f'Value="{values.get(m.group(1), m.group(1))}"', block)
+    block = re.sub(r'Name="Resolution Patch - [^"]*"', f'Name="Resolution Patch - {width}x{height}"', block, count=1)
+    return '<?xml version="1.0" encoding="utf-8"?>\n<Patch>\n    ' + block + '\n</Patch>\n'
+
+
+def upscaler_render_size(ini, environment):
+    """(width, height, output) when a temporal upscaler preset renders below the output size, else None.
+    The output is the chosen render resolution: the upscaler delivers it and the preset renders below
+    it. The launcher's upscaler switch must be on; SPARTAN_UPSCALER and SPARTAN_UPSCALE_PRESET override
+    spartanport.ini as in the game."""
+    if environment.get('SPARTAN_EXPERIMENTAL_UPSCALER') != '1':
+        return None
+    upscaler = environment.get('SPARTAN_UPSCALER') or ini.get('upscaler', 'none')
+    if upscaler not in ('fsr3', 'fsr4', 'fsr411'):
+        return None
+    output = resolution_size(ini.get('render_resolution', 'native')) or SIZES['native']
+    size = upscale_render_size(environment.get('SPARTAN_UPSCALE_PRESET') or ini.get('preset', '0'), output)
+    return (*size, output) if size else None
 
 
 def resolution_size(name):
@@ -140,13 +222,28 @@ def startup_options(ini, extra=()):
         options['engine_fps'] = '120'
     for key in ('deferred_readback', 'stale_readback', 'async_shaders'):
         options[key] = '0' if options[key] == '0' else '1'
+    monitor = options['monitor']
+    options['monitor'] = monitor if monitor.isascii() and monitor.isdigit() and len(monitor) <= 10 and int(monitor) <= 2147483647 else ''
+    options['hdr'] = '1' if options['hdr'] == '1' else '0'
+    if options['glyph_style'] not in ('off', 'auto', 'xbox', 'nintendo', 'keyboard'):
+        options['glyph_style'] = 'off'
+    if options['anisotropy'] not in ('0', '2', '4', '8', '16'):
+        options['anisotropy'] = '0'
     return options
 
 
-def prepare(config, state_path, extra=()):
+def prepare(config, state_path, extra=(), environment=None):
     """(options, reverted): the startup options of this launch, restoring the last confirmed
     ones when the previous launch after a restart never confirmed its own."""
     ini = read_ini(config)
+    if environment is not None:
+        migrated = {key: environment.get(env, DEFAULTS[key]) for key, env in
+                    (('monitor', 'SPARTAN_MONITOR'), ('hdr', 'SPARTAN_HDR'),
+                     ('glyph_style', 'SPARTAN_GLYPH_STYLE'), ('anisotropy', 'SPARTAN_ANISOTROPY')) if key not in ini}
+        if migrated:
+            ini.update(migrated)
+            normalized = startup_options(ini, extra)
+            write_keys(config, {key: normalized[key] for key in migrated})
     state = {}
     try:
         state = json.loads(Path(state_path).read_text(encoding='utf-8'))
@@ -176,7 +273,7 @@ def patch_names(names, options, texture_fix_available=True):
         names = [n for n in names if n != TEXTURE_FIX] + [f'{RESOLUTION_PREFIX} - {resolution}']
     elif texture_fix_available and TEXTURE_FIX not in names:
         names.insert(0, TEXTURE_FIX)
-    # The engine rate is chosen live (gow3_settings.cpp SyncEngineFps): the highest patch gives
+    # The engine rate is chosen live (spartanport_settings.cpp SyncEngineFps): the highest patch gives
     # the swing energy fix and a vblank every lower rate fits in.
     names.append(f'{FPS_PREFIX} - {max(ENGINE_FPS)} FPS')
     return names
@@ -207,6 +304,9 @@ def applied_engine_fps(names):
 
 
 def environment(options):
-    return {'GOW3_DEFERRED_READBACK': options['deferred_readback'],
-            'GOW3_STALE_READBACK': options['stale_readback'],
-            'GOW3_ASYNC_SHADERS': options['async_shaders']}
+    return {'SPARTAN_DEFERRED_READBACK': options['deferred_readback'],
+            'SPARTAN_STALE_READBACK': options['stale_readback'],
+            'SPARTAN_ASYNC_SHADERS': options['async_shaders'],
+            'SPARTAN_MONITOR': options.get('monitor', ''), 'SPARTAN_HDR': options.get('hdr', '0'),
+            'SPARTAN_GLYPH_STYLE': options.get('glyph_style', 'off'),
+            'SPARTAN_ANISOTROPY': options.get('anisotropy', '0')}

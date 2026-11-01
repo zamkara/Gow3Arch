@@ -4,12 +4,14 @@
 static int32_t guest_errno;
 int32_t *runtime_errno(void) { return &guest_errno; }
 int32_t runtime_guest_errno(int e) { return e; }
+uint64_t runtime_wait_begin(void) { return 0; }
+void runtime_wait_end(const char *what,uint64_t start,const char *detail,long long arg) { (void)what; (void)start; (void)detail; (void)arg; }
 uintptr_t runtime_lookup(const RuntimeExport *table,size_t n,const char *name) {
     for (size_t i=0;i<n;++i) if (!strcmp(table[i].name,name)) return (uintptr_t)table[i].function;
     return 0;
 }
 int main(void) {
-    char root[]="/tmp/gow3-mod-files-XXXXXX";
+    char root[]="/tmp/spartanport-mod-files-XXXXXX";
     assert(mkdtemp(root));
     char game[512],user[512],source[512],link[512];
     snprintf(game,sizeof(game),"%s/game",root);

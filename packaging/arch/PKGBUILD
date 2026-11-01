@@ -7,7 +7,7 @@ arch=('x86_64')
 url='https://github.com/zamkara/Gow3Arch'
 license=('GPL-2.0-or-later' 'MIT' 'OFL-1.1')
 depends=('glibc' 'gcc-libs' 'vulkan-icd-loader' 'sdl3' 'ffmpeg' 'fmt' 'xxhash'
-         'zydis' 'libx11' 'python' 'python-pillow' 'tk' 'xdg-utils')
+         'zydis' 'fontconfig' 'libxkbcommon' 'xorg-xrandr' 'libx11' 'python' 'python-pillow' 'tk' 'xdg-utils')
 makedepends=('git' 'cmake' 'ninja' 'pkgconf' 'boost' 'robin-map' 'vulkan-headers'
              'glslang' 'spirv-tools' 'python-installer')
 checkdepends=('xorg-server-xvfb' 'xorg-xauth' 'ttf-dejavu' 'desktop-file-utils')
@@ -29,7 +29,7 @@ noextract=("$_wheel")
 pkgver() {
     cd "$srcdir/gow3-source"
     local version
-    version=$(sed -n "s/^VERSION = '\([^']*\)'/\1/p" launcher/gow3_launcher_win.py)
+    version=$(sed -n "s/^VERSION = '\([^']*\)'/\1/p" launcher/spartanport_launcher_win.py)
     printf '%s.r%s.g%s' "$version" "$(git rev-list --count HEAD)" "$(git rev-parse --short=12 HEAD)"
 }
 
@@ -41,18 +41,18 @@ prepare() {
 
 build() {
     cd "$srcdir/gow3-source"
-    export GOW3_PGO=off GOW3_LTO=OFF
-    export GOW3_BUILD_JOBS=${GOW3_BUILD_JOBS:-2}
+    export SPARTAN_PGO=off SPARTAN_LTO=OFF
+    export SPARTAN_BUILD_JOBS=${SPARTAN_BUILD_JOBS:-2}
     export CMAKE_INCLUDE_PATH="$srcdir/headers${CMAKE_INCLUDE_PATH:+:$CMAKE_INCLUDE_PATH}"
     bash build.sh
 }
 
 check() {
     cd "$srcdir/gow3-source"
-    out/gow3-probe --cpu-features
+    out/spartanport-probe --cpu-features
     c++ -std=c++20 -Wall -Wextra -Werror -Igpu/shim tests/test_perf_refresh.cpp -o "$srcdir/perf-refresh-test"
     "$srcdir/perf-refresh-test"
-    c++ -std=c++20 -Wall -Wextra -Werror -Igpu/shim tests/test_perf_overlay.cpp gpu/shim/gow3_settings.cpp -o "$srcdir/perf-overlay-test"
+    c++ -std=c++20 -Wall -Wextra -Werror -Igpu/shim tests/test_perf_overlay.cpp gpu/shim/spartanport_settings.cpp -o "$srcdir/perf-overlay-test"
     "$srcdir/perf-overlay-test"
     desktop-file-validate "$startdir/gow3.desktop" "$startdir/gow3-play.desktop"
     # Run Python regression tests on a virtual X display, without a game dump.
@@ -62,9 +62,9 @@ check() {
 package() {
     cd "$srcdir/gow3-source"
     local dest="$pkgdir/usr/lib/gow3"
-    install -Dm755 out/gow3-probe "$dest/bin/gow3-probe"
-    install -Dm755 out/gow3-gpu-capabilities "$dest/bin/gow3-gpu-capabilities"
-    install -Dm755 out/gpu/libgow3gpu.so "$dest/bin/gpu/libgow3gpu.so"
+    install -Dm755 out/spartanport-probe "$dest/bin/spartanport-probe"
+    install -Dm755 out/spartanport-gpu-capabilities "$dest/bin/spartanport-gpu-capabilities"
+    install -Dm755 out/gpu/libspartanportgpu.so "$dest/bin/gpu/libspartanportgpu.so"
     install -Dm644 run.py "$dest/run.py"
     python - "$dest/build-info.json" "$pkgver-$pkgrel" "$_commit" <<'PYBUILD'
 import json,pathlib,sys
@@ -80,7 +80,7 @@ PYBUILD
     install -Dm755 "$startdir/gow3" "$pkgdir/usr/bin/gow3"
     install -Dm644 "$startdir/gow3.desktop" "$pkgdir/usr/share/applications/gow3.desktop"
     install -Dm644 "$startdir/gow3-play.desktop" "$pkgdir/usr/share/applications/gow3-play.desktop"
-    install -Dm644 launcher/gow3.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/gow3.png"
+    install -Dm644 launcher/spartanport.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/gow3.png"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/gow3/LICENSE"
     install -Dm644 launcher/OFL-Cinzel.txt "$pkgdir/usr/share/licenses/gow3/OFL-Cinzel.txt"
     install -Dm644 "$dest/python/iced_x86-1.21.0.dist-info/LICENSE.txt" "$pkgdir/usr/share/licenses/gow3/iced-x86-LICENSE"

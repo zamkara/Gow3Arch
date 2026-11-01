@@ -10,7 +10,7 @@ mapfile -t packages < <(printf '%s\n' /release/gow3-*-x86_64.pkg.tar.zst)
 printf '\n[options]\nNoExtract = !usr/share/doc/ !usr/share/doc/gow3/ !usr/share/doc/gow3/*\n' >> /etc/pacman.conf
 pacman -U --noconfirm "${packages[0]}"
 [[ -s /usr/share/doc/gow3/README.md ]]
-for binary in /usr/lib/gow3/bin/gow3-probe /usr/lib/gow3/bin/gow3-gpu-capabilities /usr/lib/gow3/bin/gpu/libgow3gpu.so; do
+for binary in /usr/lib/gow3/bin/spartanport-probe /usr/lib/gow3/bin/spartanport-gpu-capabilities /usr/lib/gow3/bin/gpu/libspartanportgpu.so; do
     output=$(ldd "$binary")
     printf '%s\n' "$output"
     if grep -q 'not found' <<< "$output"; then exit 1; fi
@@ -24,7 +24,7 @@ assert re.fullmatch(r'[0-9a-f]{40}',info['commit'])
 assert info['package_version']
 print('Native build identity:',info['commit'],info['package_version'])
 PYINFO
-/usr/lib/gow3/bin/gow3-probe --cpu-features
+/usr/lib/gow3/bin/spartanport-probe --cpu-features
 useradd -m player
 work=$(mktemp -d)
 chown player:player "$work"
