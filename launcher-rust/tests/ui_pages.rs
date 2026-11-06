@@ -10,6 +10,7 @@ use common::{
 use spartanport_launcher::core::env::game_environment;
 use spartanport_launcher::core::gpu::{display_label, parse_display_list};
 use spartanport_launcher::core::options::DISPLAY_MODES;
+use spartanport_launcher::core::pad_model::PadModel;
 use spartanport_launcher::ui::app::{self, Message};
 use spartanport_launcher::ui::follow::{follow, Cause};
 use spartanport_launcher::ui::pages::{performance, Page};
@@ -1118,9 +1119,11 @@ fn pressed_keys_become_sdl_names() {
         assert_eq!(state.controls.key["cross"], name, "{key:?} {location:?}");
         assert!(state.controls.capturing.is_none(), "{key:?}");
     }
-    // While no box waits, the keys navigate as before.
+    // While no box waits, the keyboard picture shows the key; it neither binds nor moves away.
+    let bound = state.controls.key.clone();
     press_key(&mut state, Key::Named(Named::ArrowLeft), Location::Standard);
-    assert_eq!(state.page, Page::Trophies);
+    assert_eq!(state.page, Page::Controls);
+    assert_eq!(state.controls.key, bound);
 }
 
 #[test]
@@ -1260,10 +1263,10 @@ fn nintendo_names_follow_the_button_positions() {
     let mut state = controls_state(dir.path());
     click(&mut state, "Gamepad");
     assert_eq!(state.controls.pad_style, "playstation");
-    click_tall(&mut state, "Nintendo");
+    click_tall(&mut state, "Switch Pro");
     assert_eq!(state.controls.pad_style, "nintendo");
     assert_eq!(state.store.text("pad_style"), "nintendo");
-    // The table relabels its boxes; L2, R2 and Touchpad left keep their fixed text.
+    // The table relabels its boxes, the triggers too; Touchpad left stays on its combination.
     let rows = controls::pad_rows(&state, "en");
     let row = |button: &str| {
         rows.iter()
@@ -1271,17 +1274,12 @@ fn nintendo_names_follow_the_button_positions() {
             .unwrap()
             .clone()
     };
-    let PadChoice::Pick { pairs, current } = row("cross").choice else {
-        panic!("cross has a box");
-    };
+    let PadChoice { pairs, current } = row("cross").choice;
     assert_eq!(current, "B");
     assert_eq!(pairs, controls::pad_labels("nintendo", "en"));
-    assert!(matches!(row("circle").choice, PadChoice::Pick { current, .. } if current == "A"));
-    assert!(matches!(row("l2").choice, PadChoice::Fixed(text) if text == "L2 trigger"));
-    assert!(
-        matches!(row("touchpad_left").choice, PadChoice::Fixed(text) if text == "L1 + Touchpad right")
-    );
-    page_has(&state, &["L2 trigger", "R2 trigger", "L1 + Touchpad right"]);
+    assert_eq!(row("circle").choice.current, "A");
+    assert_eq!(row("l2").choice.current, "ZL");
+    assert_eq!(row("touchpad_left").choice.current, "L1 + Touchpad right");
     // Choosing a label stores its SDL name: Nintendo's A is the east button.
     let pick = controls::pad_pick("cross", &pairs, "A");
     assert!(matches!(
@@ -1427,7 +1425,8 @@ fn reset_buttons_and_the_rage_rows() {
     );
     controls_update(&mut state, ControlsMessage::ResetTable(Kind::Pad));
     assert_eq!(state.controls.pad["cross"], "a");
-    assert_eq!(state.controls.pad["l2"], "");
+    assert_eq!(state.controls.pad["l2"], "lefttrigger");
+    assert_eq!(state.controls.pad["touchpad_left"], "");
 }
 
 /// `state` on the Controls page once the drawer has stopped (a key box's click restarts the clock).
@@ -1484,6 +1483,13 @@ fn capture_alternative(state: &mut app::State, button: &str) {
     );
 }
 
+fn capture_second_alternative(state: &mut app::State, button: &str) {
+    controls_update(
+        state,
+        ControlsMessage::Capture(button.into(), Slot::SecondAlternative),
+    );
+}
+
 fn key_row(state: &app::State, button: &str) -> controls::KeyRow {
     controls::key_rows(state, "en")
         .into_iter()
@@ -1521,6 +1527,57 @@ fn an_alternative_box_binds_next_to_the_main_key() {
         ControlsMessage::Captured("cross".into(), Slot::Alternative, "Mouse Forward".into()),
     );
     assert_eq!(state.controls.key_alt["cross"], "Mouse Forward");
+}
+
+#[test]
+fn the_third_box_binds_a_second_alternative_next_to_the_other_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = controls_state(dir.path());
+    assert_eq!(
+        key_row(&state, "square").second_alternative,
+        "(2nd alternative)"
+    );
+    capture_alternative(&mut state, "square");
+    press_key(&mut state, char_key("j"), Location::Standard);
+    capture_second_alternative(&mut state, "square");
+    assert_eq!(
+        key_row(&state, "square").second_alternative,
+        "Press a key or mouse (5)"
+    );
+    // Only the clicked box waits.
+    assert_eq!(key_row(&state, "square").alternative, "J");
+    press_key(&mut state, char_key("k"), Location::Standard);
+    let row = key_row(&state, "square");
+    assert_eq!(
+        (
+            row.input.as_str(),
+            row.alternative.as_str(),
+            row.second_alternative.as_str()
+        ),
+        ("Mouse Left", "J", "K")
+    );
+    assert!(row.has_second_alternative && !key_row(&state, "cross").has_second_alternative);
+    assert_eq!(state.controls.key_alt2["square"], "K");
+    // A key of another box of the same button swaps with it.
+    capture_second_alternative(&mut state, "square");
+    press_key(&mut state, char_key("j"), Location::Standard);
+    assert_eq!(state.controls.key_alt["square"], "K");
+    assert_eq!(state.controls.key_alt2["square"], "J");
+    // Its × drops it and leaves the other box alone; the row arrow and the reset drop both.
+    controls_update(
+        &mut state,
+        ControlsMessage::Clear("square".into(), Slot::SecondAlternative),
+    );
+    assert!(state.controls.key_alt2.is_empty());
+    assert_eq!(state.controls.key_alt["square"], "K");
+    capture_second_alternative(&mut state, "square");
+    press_key(&mut state, char_key("m"), Location::Standard);
+    controls_update(&mut state, ControlsMessage::ResetKey("square".into()));
+    assert!(state.controls.key_alt.is_empty() && state.controls.key_alt2.is_empty());
+    capture_second_alternative(&mut state, "cross");
+    press_key(&mut state, char_key("m"), Location::Standard);
+    controls_update(&mut state, ControlsMessage::ResetTable(Kind::Key));
+    assert!(state.controls.key_alt2.is_empty());
 }
 
 #[test]
@@ -1662,6 +1719,46 @@ fn alternatives_are_saved_only_when_there_are_any() {
 }
 
 #[test]
+fn second_alternatives_are_saved_only_when_there_are_any_and_come_back() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("settings.json"),
+        r#"{"controls_layout": 4, "controls": {"key": {"cross": "H"}, "key_alt": {"cross": "K"}}}"#,
+    )
+    .unwrap();
+    // Settings with one alternative load without a second and save the same controls.
+    let mut state = controls_state(dir.path());
+    assert!(state.controls.key_alt2.is_empty());
+    let saved = spartanport_launcher::ui::persist::gather(&state).app["controls"].clone();
+    assert_eq!(
+        saved,
+        serde_json::json!({"key": {"cross": "H"}, "pad": {}, "key_alt": {"cross": "K"}})
+    );
+    capture_second_alternative(&mut state, "cross");
+    controls_update(
+        &mut state,
+        ControlsMessage::Captured("cross".into(), Slot::SecondAlternative, "Keypad 2".into()),
+    );
+    let saved = spartanport_launcher::ui::persist::gather(&state).app["controls"].clone();
+    assert_eq!(
+        saved,
+        serde_json::json!({
+            "key": {"cross": "H"},
+            "pad": {},
+            "key_alt": {"cross": "K"},
+            "key_alt2": {"cross": "Keypad 2"}
+        })
+    );
+    let file = serde_json::json!({"controls_layout": 4, "controls": saved});
+    std::fs::write(dir.path().join("settings.json"), file.to_string()).unwrap();
+    let reopened = controls_state(dir.path());
+    assert_eq!(reopened.controls.key_alt2, state.controls.key_alt2);
+    let wrong = serde_json::json!({"controls_layout": 4, "controls": {"key_alt2": ["J"]}});
+    std::fs::write(dir.path().join("settings.json"), wrong.to_string()).unwrap();
+    assert!(controls_state(dir.path()).controls.key_alt2.is_empty());
+}
+
+#[test]
 fn the_icon_keys_choice_shows_with_the_styles_that_draw_the_keyboard() {
     let dir = tempfile::tempdir().unwrap();
     let mut state = controls_state(dir.path());
@@ -1684,6 +1781,74 @@ fn the_icon_keys_choice_shows_with_the_styles_that_draw_the_keyboard() {
         Message::Set("glyph_keys".into(), serde_json::json!("alternative")),
     );
     assert_eq!(state.store.text("glyph_keys"), "alternative");
+    let _ = app::update(
+        &mut state,
+        Message::Set("glyph_keys".into(), serde_json::json!("lyre")),
+    );
+    assert_eq!(state.store.text("glyph_keys"), "lyre");
+}
+
+#[test]
+fn the_key_colors_choice_shows_with_the_keyboard_and_the_custom_boxes_with_custom() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = controls_state(dir.path());
+    assert_eq!(state.store.text("glyph_key_colors"), "gray");
+    for (style, shown) in [
+        ("off", false),
+        ("xbox", false),
+        ("nintendo", false),
+        ("auto", true),
+        ("keyboard", true),
+    ] {
+        let _ = app::update(
+            &mut state,
+            Message::Set("glyph_style".into(), serde_json::json!(style)),
+        );
+        assert_eq!(tall_has(&state, "Key colors"), shown, "{style}");
+    }
+    // The four boxes appear with Custom only.
+    assert!(!tall_has(&state, "Face button colors"));
+    let _ = app::update(
+        &mut state,
+        Message::Set("glyph_key_colors".into(), serde_json::json!("playstation")),
+    );
+    assert!(!tall_has(&state, "Face button colors"));
+    let _ = app::update(
+        &mut state,
+        Message::Set("glyph_key_colors".into(), serde_json::json!("custom")),
+    );
+    assert!(tall_has(&state, "Face button colors"));
+    let _ = app::update(
+        &mut state,
+        Message::Set("glyph_color_cross".into(), serde_json::json!("blue")),
+    );
+    assert_eq!(state.store.text("glyph_color_cross"), "blue");
+}
+
+#[test]
+fn the_key_colors_choice_offers_gray_playstation_and_custom() {
+    let styles: Vec<&str> = spartanport_launcher::core::options::KEY_COLOR_STYLES
+        .iter()
+        .map(|choice| choice.value)
+        .collect();
+    assert_eq!(styles, ["gray", "playstation", "custom"]);
+    let palette: Vec<&str> = spartanport_launcher::core::options::KEY_COLORS
+        .iter()
+        .map(|choice| choice.value)
+        .collect();
+    assert_eq!(
+        palette,
+        ["gray", "white", "blue", "orange", "green", "red", "pink", "yellow", "purple"]
+    );
+}
+
+#[test]
+fn the_icon_keys_choice_offers_the_main_key_the_alternative_and_the_lyre_alone() {
+    let values: Vec<&str> = spartanport_launcher::core::options::GLYPH_KEYS
+        .iter()
+        .map(|choice| choice.value)
+        .collect();
+    assert_eq!(values, ["main", "alternative", "lyre"]);
 }
 
 #[test]
@@ -1828,8 +1993,10 @@ fn a_gamepad_found_while_a_box_waits_ends_the_capture() {
     assert_eq!(state.controls.key, before);
     // No hidden box takes the next click: it reaches the gamepad section.
     assert!(matches!(
-        tall_messages(&state, "Nintendo").as_slice(),
-        [Message::Controls(ControlsMessage::PadStyle(style))] if style == "nintendo"
+        tall_messages(&state, "Switch Pro").as_slice(),
+        [Message::Controls(ControlsMessage::PadModel(
+            PadModel::SwitchPro
+        ))]
     ));
 }
 
@@ -1844,10 +2011,10 @@ fn losing_the_focus_ends_the_capture() {
     assert!(state.controls.capturing.is_none());
     assert!(state.controls.capture_started.is_none());
     assert_eq!(state.controls.key, before);
-    // The next key navigates again instead of binding.
+    // The next key binds nothing.
     let _ = app::update(&mut state, Message::WindowFocused(true));
     press_key(&mut state, Key::Named(Named::ArrowLeft), Location::Standard);
-    assert_eq!(state.page, Page::Trophies);
+    assert_eq!(state.page, Page::Controls);
     assert_eq!(state.controls.key, before);
 }
 

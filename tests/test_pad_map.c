@@ -31,6 +31,37 @@ static uint32_t pressed_by(const ButtonMap *map, int source) {
 }
 
 int main(void) {
+    /* The triggers are gamepad sources, and a mapped PS4 trigger leaves its physical one. */
+    ButtonMap triggers=pad_map;
+    assert(!trigger_mapped[0] && !trigger_mapped[1]);
+    assert(apply_button_map(&triggers,"l1=lefttrigger,l2=leftshoulder",false)==2);
+    assert(pressed_by(&triggers,PAD_LEFT_TRIGGER)==BTN_L1);
+    assert(pressed_by(&triggers,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)==BTN_L2);
+    assert(trigger_mapped[0] && !trigger_mapped[1]);
+    assert(apply_button_map(&triggers,"r2=None",false)==1 && trigger_mapped[1]);
+    trigger_mapped[0]=trigger_mapped[1]=false;
+
+    /* Photo mode on a button of its own, without L1. */
+    ButtonMap photo=pad_map;
+    assert(apply_button_map(&photo,"touchpad_left=guide",false)==1);
+    assert(pressed_by(&photo,SDL_GAMEPAD_BUTTON_GUIDE)==CLICK_LEFT);
+
+    /* Dead zone: off changes nothing, inside is centre, past it the stick starts from zero. */
+    uint8_t x=140, y=128;
+    apply_deadzone(&x,&y,0);
+    assert(x==140 && y==128);
+    apply_deadzone(&x,&y,20);
+    assert(x==128 && y==128);
+    x=153; y=128;   /* 25/127, just past 19% */
+    apply_deadzone(&x,&y,19);
+    assert(x>=128 && x<=132 && y==128);
+    x=255; y=128;
+    apply_deadzone(&x,&y,20);
+    assert(x==255 && y==128);
+    x=0; y=128;
+    apply_deadzone(&x,&y,20);
+    assert(x==1 && y==128);   /* length past 1 is cut back to full tilt */
+
     ButtonMap directions=key_map;
     assert(apply_button_map(&directions,"move_up=T,move_down=G,move_left=F,move_right=H,"
                                        "look_up=Keypad 8,look_down=Keypad 2,"
@@ -559,6 +590,21 @@ int main(void) {
     key_map=original_keys;
     spartanport_qte.block=0;
 
+    /* A value longer than 2048 bytes is read whole: the last entry still applies. */
+    static char long_map[4096];
+    static const char *const long_names="Mouse Forward   |   Mouse Middle   |   Left Ctrl   |   Right Ctrl";
+    static const char *const last_names="Keypad 7   |   Keypad 9   |   Keypad 1   |   Right Ctrl";
+    const size_t all_count=sizeof(all_buttons)/sizeof(*all_buttons);
+    long_map[0]=0;
+    for (size_t i=0;i<all_count;++i)
+        snprintf(long_map+strlen(long_map),sizeof(long_map)-strlen(long_map),"%s  %s  =  %s  ",
+                 i ? "," : "",all_buttons[i],i+1==all_count ? last_names : long_names);
+    assert(strlen(long_map)>2048 && strlen(long_map)<sizeof(long_map));
+    ButtonMap long_keys=key_map;
+    assert(apply_button_map(&long_keys,long_map,true)==(int)all_count);
+    assert(pressed_by(&long_keys,SDL_SCANCODE_KP_7)==LOOK_RIGHT && pressed_by(&long_keys,SDL_SCANCODE_KP_1)==LOOK_RIGHT);
+    assert((pressed_by(&long_keys,SDL_SCANCODE_RCTRL) & BTN_CROSS)!=0 && (pressed_by(&long_keys,SDL_SCANCODE_RCTRL) & LOOK_RIGHT)!=0);
+    assert((pressed_by(&long_keys,MOUSE_FORWARD) & BTN_CROSS)!=0 && (pressed_by(&long_keys,MOUSE_FORWARD) & LOOK_RIGHT)==0);
     /* Either source presses the button in a read of the keyboard, and the main one still works. */
     const ButtonMap before_alternatives=key_map;
     key_map=alternatives;
