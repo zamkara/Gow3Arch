@@ -421,15 +421,33 @@ void SyncEngineFps() {
     capped = capping;
 }
 
-int CycleEngineFps() {
+int StepEngineFps(int direction) {
     auto& v = Get();
     if (!v.engine_fps_global || v.applied_engine_fps <= 60) {
         return 0;
     }
     // From the player's rate, not the QTE cap: the cap never reaches engine_fps.
-    v.engine_fps = SpartanGraphics::NextEngineFps(EngineFpsChosen(), v.applied_engine_fps);
+    v.engine_fps = SpartanGraphics::StepEngineFps(EngineFpsChosen(), direction, v.applied_engine_fps);
     Save();
     return v.engine_fps;
+}
+
+int ToggleCheat(int number) {
+    auto& v = Get();
+    int on = -1;
+    if (number == int(SPARTAN_CHEAT_COUNT) + 1) {
+        if (!v.qte_supported.load()) return -1;
+        on = !v.auto_qte.load();
+        v.auto_qte = on;
+    } else if (number >= 1 && number <= int(SPARTAN_CHEAT_COUNT)) {
+        if (!(v.cheats_supported.load() & (1u << (number - 1)))) return -1;
+        on = !v.cheats[number - 1].load();
+        v.cheats[number - 1] = on;
+    } else {
+        return -1;
+    }
+    Save();
+    return on;
 }
 
 bool GraphicsNeedRestart() {
@@ -483,7 +501,7 @@ bool ResolutionNeedsRestart() {
 }
 
 void Save() {
-    static std::mutex mutex; // the menu and the pad thread (CycleEngineFps)
+    static std::mutex mutex; // the menu and the pad thread (StepEngineFps)
     std::scoped_lock lock{mutex};
     const auto& v = Get();
     FILE* file = std::fopen(Path(), "w");
@@ -811,9 +829,9 @@ extern "C" uint64_t spartanportgpu_native_setting(unsigned function) {
         const auto names = SpartanGraphics::ResolutionNames();
         const auto aspect = [](const std::string& name) {
             const auto [w, h] = SpartanGraphics::ResolutionSize(name);
-            const char* labels[] = {"16:9", "16:10", "21:9", "32:9", "4:3"};
-            const double ratios[] = {16.0/9, 1.6, 2.37, 32.0/9, 4.0/3};
-            for (unsigned i = 0; i < 5; ++i) if (std::abs(double(w)/h - ratios[i]) < 0.05)
+            const char* labels[] = {"16:9", "16:10", "21:9", "32:9", "48:9", "4:3"};
+            const double ratios[] = {16.0/9, 1.6, 2.37, 32.0/9, 48.0/9, 4.0/3};
+            for (unsigned i = 0; i < 6; ++i) if (std::abs(double(w)/h - ratios[i]) < 0.05)
                 return std::string(labels[i]);
             const int divisor = std::gcd(w, h);
             return std::to_string(w/divisor) + ":" + std::to_string(h/divisor);
@@ -832,7 +850,7 @@ extern "C" uint64_t spartanportgpu_native_setting(unsigned function) {
             };
             if (index <= 1) {
                 std::vector<std::string> aspects;
-                for (const char* a : {"16:9", "16:10", "21:9", "32:9", "4:3"}) aspects.emplace_back(a);
+                for (const char* a : {"16:9", "16:10", "21:9", "32:9", "48:9", "4:3"}) aspects.emplace_back(a);
                 for (const auto& name : names) {
                     const auto a = aspect(name);
                     if (std::find(aspects.begin(), aspects.end(), a) == aspects.end()) aspects.push_back(a);
@@ -854,9 +872,8 @@ extern "C" uint64_t spartanportgpu_native_setting(unsigned function) {
                 v.render_resolution = resolution;
             } else if (index == 2) v.fps_limit = cycle(SpartanGraphics::FpsLimits, v.fps_limit);
             else if (index == 3) {
-                std::vector<int> rates;
-                for (int rate : SpartanGraphics::EngineFps) if (rate <= v.applied_engine_fps) rates.push_back(rate);
-                v.engine_fps = cycle(rates, v.engine_fps);
+                v.engine_fps = SpartanGraphics::StepEngineFps(SpartanSettings::EngineFpsChosen(), direction,
+                                                              v.applied_engine_fps);
             } else if (index == 4) {
                 std::vector<int> monitors{-1};
                 monitors.insert(monitors.end(), v.monitors.begin(), v.monitors.end());

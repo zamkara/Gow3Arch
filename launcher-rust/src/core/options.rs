@@ -268,6 +268,10 @@ pub static VIDEO_BACKENDS: &[Choice] = &[
     c("x11", "X11 (XWayland)"),
 ];
 
+/// The engine frame rates the in-game menu can save (spartanport_graphics.h MinEngineFps..MaxEngineFps).
+pub const MIN_ENGINE_FPS: u32 = 30;
+pub const MAX_ENGINE_FPS: u32 = 240;
+
 pub static ENGINE_FPS_CHOICES: &[Choice] = &[
     c("60", "60 (original)"),
     c("100", "100"),
@@ -300,6 +304,9 @@ pub static RESOLUTIONS: &[&str] = &[
     "2048x1536",
     "2560x1920",
     "5120x2160",
+    "2880x1800",
+    "5120x2880",
+    "11520x2160",
     "8K",
 ];
 
@@ -335,6 +342,7 @@ const ASPECTS: &[(&str, f64)] = &[
     ("16:10", 16.0 / 10.0),
     ("21:9", 2.37),
     ("32:9", 32.0 / 9.0),
+    ("48:9", 48.0 / 9.0),
     ("4:3", 4.0 / 3.0),
 ];
 
@@ -511,6 +519,12 @@ mod tests {
         assert_eq!(aspect_of("2560x1080").as_deref(), Some("21:9"));
         assert_eq!(aspect_of("bogus"), None);
         assert_eq!(aspect_of("1000x800").as_deref(), Some("5:4"));
+        // #719: three 4K screens side by side.
+        assert_eq!(aspect_of("11520x2160").as_deref(), Some("48:9"));
+        assert_eq!(
+            resolutions_for("48:9", &strings(RESOLUTIONS)),
+            ["11520x2160"]
+        );
     }
 
     #[test]
@@ -571,7 +585,7 @@ mod tests {
         }
         let names: HashSet<_> = RESOLUTIONS.iter().collect();
         assert_eq!(names.len(), RESOLUTIONS.len());
-        assert_eq!(RESOLUTIONS.len(), 23);
+        assert_eq!(RESOLUTIONS.len(), 26);
     }
 
     #[test]
@@ -596,7 +610,16 @@ mod tests {
     fn beta_resolutions_are_the_untested_custom_ones() {
         assert_eq!(
             beta_resolutions(),
-            ["2560x1080", "1440x1080", "2048x1536", "2560x1920", "8K"]
+            [
+                "2560x1080",
+                "1440x1080",
+                "2048x1536",
+                "2560x1920",
+                "2880x1800",
+                "5120x2880",
+                "11520x2160",
+                "8K"
+            ]
         );
     }
 }

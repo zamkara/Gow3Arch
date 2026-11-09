@@ -120,6 +120,7 @@ ImFont* title_font = nullptr; // Cinzel with DejaVu Sans for what it lacks; null
 constexpr float kTitleSize = 32.0f, kTabSize = 22.0f, kSectionSize = 19.0f; // px at 1080p
 std::atomic<bool> menu_open{false};
 bool r3_down = false, l2_down = false, r2_down = false;
+bool f10_held = false;
 std::atomic<bool> loading{false};
 std::atomic<u32> loading_done{0}, loading_total{0};
 std::atomic<u32> background_done{0}, background_total{0};
@@ -353,6 +354,25 @@ void MultiplierRow(const char* label, std::atomic<float>& value, const char* hel
     ImGui::PopID();
 }
 
+// 30 to 240 FPS with a 60 button (the game's own rate).
+void EngineFpsRow(std::atomic<int>& value, const char* help) {
+    Row("Engine frame rate");
+    const ImGuiStyle& style = ImGui::GetStyle();
+    ImGui::SetNextItemWidth(-(ImGui::CalcTextSize("60").x + style.FramePadding.x * 2 + style.ItemSpacing.x));
+    int v = value;
+    if (ImGui::SliderInt("##value", &v, SpartanGraphics::MinEngineFps, SpartanGraphics::MaxEngineFps, "%d FPS",
+                         ImGuiSliderFlags_AlwaysClamp)) {
+        Store(value, SpartanGraphics::ParseEngineFps(v), true);
+    }
+    Help(help);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("60")) {
+        Store(value, 60, true);
+    }
+    Help(help);
+    ImGui::PopID();
+}
+
 void InfoRow(const char* label, const char* text) {
     Row(label);
     DisabledText(text);
@@ -426,6 +446,12 @@ bool DualSenseConnected() {
     return found;
 }
 
+// The cheats in the order of SpartanSettings' cheats[] and F10 + 1 to 8 (8 is Automatic QTE).
+constexpr const char* kCheatNames[] = {"Infinite health", "Infinite magic", "Infinite item meter",
+                                       "Infinite Rage of Sparta", "Max red orbs", "Unlock Very Hard",
+                                       "Infinite Double Jumps", "Automatic QTE"};
+static_assert(std::size(kCheatNames) == SPARTAN_CHEAT_COUNT + 1);
+
 void GameTab() {
     auto& s = SpartanSettings::Get();
     if (BeginRows("##language")) {
@@ -435,9 +461,6 @@ void GameTab() {
     }
     Separator("Cheats");
     if (BeginRows("##cheats")) {
-        static const char* const names[] = {"Infinite health", "Infinite magic", "Infinite item meter",
-                                            "Infinite Rage of Sparta", "Max red orbs",
-                                            "Unlock Very Hard", "Infinite Double Jumps"};
         static const char* const helps[] = {
             "Health stays full. Only Kratos is protected. Turning it off does not undo past refills.",
             "Magic stays full.", "The item meter (bow, Helios' head, boots) stays full.",
@@ -447,11 +470,11 @@ void GameTab() {
         for (unsigned cheat = 0; cheat < SPARTAN_CHEAT_COUNT; ++cheat) {
             const bool available = (s.cheats_supported.load() & (1u << cheat)) != 0;
             ImGui::BeginDisabled(!available);
-            CheckRow(names[cheat], s.cheats[cheat], available ? helps[cheat] : Unsupported);
+            CheckRow(kCheatNames[cheat], s.cheats[cheat], available ? helps[cheat] : Unsupported);
             ImGui::EndDisabled();
         }
         ImGui::BeginDisabled(!s.qte_supported.load());
-        CheckRow("Automatic QTE", s.auto_qte,
+        CheckRow(kCheatNames[SPARTAN_CHEAT_COUNT], s.auto_qte,
                  s.qte_supported.load() ? "Quick-time prompts answer themselves: single presses, repeated "
                                           "presses, holds and stick rotations."
                                         : Unsupported);
@@ -760,11 +783,10 @@ void PerformanceTab() {
         static const char* const fps_labels[] = {"30", "60", "100", "120", "144", "180", "240", "Unlimited"};
         ChoiceRow("Frame rate limit", s.fps_limit, fps_labels, G::FpsLimits.data(), int(G::FpsLimits.size()),
                   "Caps the frame rate. The engine frame rate (below) is the highest it can go.");
-        static const char* const engine_labels[] = {"60 (original)", "100", "120", "144", "180", "240"};
-        static_assert(std::size(engine_labels) == G::EngineFps.size());
-        ChoiceRow("Engine frame rate", s.engine_fps, engine_labels, G::EngineFps.data(), int(G::EngineFps.size()),
-                  "The highest frame rate the game itself runs at. 60 for spots that break above it (a ledge "
-                  "Kratos cannot cross, a button-mash prompt). R3 + L1 + R1 or F9 go through the list.");
+        EngineFpsRow(s.engine_fps,
+                     "The highest frame rate the game itself runs at, from 30 to 240. 60 for spots that break above "
+                     "it (a ledge Kratos cannot cross, a button-mash prompt). Hold R3 and press R1 or L1, or hold F9 "
+                     "and press Right or Left: 5 FPS up or down.");
         CheckRow("High Frame Rate Physics Fix", s.auto_safe_fps,
                  "At high frame rates the engine runs at 60 while a quick-time prompt is on screen or during "
                  "the Cronos blade pull, then goes back to the engine frame rate. The saved rate does not change.");
@@ -800,6 +822,7 @@ void PerformanceTab() {
             "1360 × 768 · 16:9",
             "1280 × 960 · 4:3", "1440 × 1080 · 4:3 (beta)", "1920 × 1440 · 4:3",
             "2048 × 1536 · 4:3 (beta)", "2560 × 1920 · 4:3 (beta)", "5120 × 2160 · 21:9",
+            "2880 × 1800 · 16:10 (beta)", "5120 × 2880 · 16:9 (beta)", "11520 × 2160 · 48:9 (beta)",
             "8K · 7680 × 4320 · 16:9 (beta)"};
         static_assert(std::size(builtin_labels) == G::Resolutions.size());
         const std::vector<std::string> resolution_names = G::ResolutionNames();
@@ -2470,8 +2493,8 @@ void ShowNotice(const std::string& text, int milliseconds) {
     notice_until.store(NowMs() + milliseconds, std::memory_order_relaxed);
 }
 
-void CycleEngineFps() {
-    const int fps = SpartanSettings::CycleEngineFps();
+void StepEngineFps(int direction) {
+    const int fps = SpartanSettings::StepEngineFps(direction);
     ShowNotice(fps ? std::string(Tr("Engine frame rate: ")) + std::to_string(fps) + Tr(" FPS")
                    : std::string(Tr("Engine frame rate: 60 FPS only (no frame rate patch for this game build)")));
 }
@@ -2713,6 +2736,11 @@ bool HandleChoiceEvent(const SDL_Event& event) {
 
 bool HandleEvent(const SDL_Event& event) {
     std::scoped_lock lock{imgui_mutex};
+    // F10 for the cheat hotkeys, followed from the events (SDL_GetKeyboardState is already past an
+    // F10 release queued behind the number) and before the trophy views, which take their own keys.
+    if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) && event.key.key == SDLK_F10) {
+        f10_held = event.type == SDL_EVENT_KEY_DOWN;
+    }
     if (!initialized) {
         return false;
     }
@@ -2737,9 +2765,29 @@ bool HandleEvent(const SDL_Event& event) {
             const char* env = std::getenv("SPARTAN_FRAME_CAPTURE_KEY");
             return env && *env == '1';
         }();
+        // Hold F9: Right raises the engine frame rate 5 FPS, Left lowers it (held arrows repeat).
+        // F9 and the arrows pressed with it never reach the game.
         if (event.key.key == SDLK_F9) {
+            return true;
+        }
+        if ((event.key.key == SDLK_RIGHT || event.key.key == SDLK_LEFT) &&
+            SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F9]) {
+            if (down) {
+                StepEngineFps(event.key.key == SDLK_RIGHT ? 1 : -1);
+            }
+            return true;
+        }
+        // Hold F10 and press 1 to 8: switches that cheat (#320). F10 and those keys never reach the game.
+        if (event.key.key == SDLK_F10) {
+            return true;
+        }
+        if (event.key.key >= SDLK_1 && event.key.key <= SDLK_8 && f10_held) {
             if (down && !event.key.repeat) {
-                CycleEngineFps();
+                const int number = int(event.key.key - SDLK_1) + 1;
+                const int on = SpartanSettings::ToggleCheat(number);
+                ShowNotice(std::string(Tr(kCheatNames[number - 1])) + ": " +
+                               Tr(on < 0 ? "Unavailable" : on ? "On" : "Off"),
+                           2000);
             }
             return true;
         }
