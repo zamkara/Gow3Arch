@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "spartanport_overlay.h"
 #include "spartanport_ui_font.h"
+#include "spartanport_loading_text.h"
 
 #include <algorithm>
 #include <atomic>
@@ -12,7 +13,9 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
+#include <span>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -40,6 +43,8 @@ extern "C" void runtime_restart(void); // src/probe.c: starts run.py again, ends
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "video_core/renderdoc.h"
+#include "video_core/host_shaders/overlay_hdr_frag.h"
+#include "video_core/renderer_vulkan/vk_shader_util.h"
 
 // DejaVu Sans (Cyrillic), embedded (third_party/fonts, Bitstream Vera license), and the launcher's
 // title face, Cinzel Black (launcher/Cinzel-Black.ttf, SIL OFL 1.1, launcher/OFL-Cinzel.txt), for the
@@ -123,6 +128,8 @@ bool r3_down = false, l2_down = false, r2_down = false;
 bool f10_held = false;
 std::atomic<bool> loading{false};
 std::atomic<u32> loading_done{0}, loading_total{0};
+// The shader preparation screen: steps planned (LoadingStep bits), the one running, and why.
+std::atomic<u32> loading_steps{0}, loading_stage{0}, loading_reason{LoadingCacheOnly};
 std::atomic<u32> background_done{0}, background_total{0};
 std::atomic<u32> prefetch_done{0}, prefetch_total{0};
 std::atomic<s64> prefetch_until{0}; // "ready" stays this long after the last program
@@ -389,6 +396,51 @@ void SliderRow(const char* label, std::atomic<int>& value, int lo, int hi, const
     ImGui::PopID();
 }
 
+// Picture controls (SpartanGraphics::Picture*): gamma is kept in hundredths but shown and typed
+// (Ctrl+click) as 2.20, so the slider works on the plain value and rounds back to hundredths.
+void PictureGammaRow(std::atomic<int>& value, const char* help) {
+    namespace G = SpartanGraphics;
+    Row("Gamma");
+    float v = value / 100.0f;
+    // A typed "nan" passes ImGui's clamp, so a value that is not finite keeps the current setting.
+    if (ImGui::SliderFloat("##value", &v, G::PictureGammaMin / 100.0f, G::PictureGammaMax / 100.0f, "%.2f",
+                           ImGuiSliderFlags_AlwaysClamp) &&
+        std::isfinite(v)) {
+        // AlwaysClamp keeps a finite v within 1.80 to 2.80, so the rounding below cannot overflow.
+        Store(value, std::clamp(int(std::lround(v * 100.0f)), G::PictureGammaMin, G::PictureGammaMax), true);
+    }
+    Help(help);
+    ImGui::PopID();
+}
+
+void PictureRows(SpartanSettings::Values& s) {
+    namespace G = SpartanGraphics;
+    SliderRow("Brightness", s.picture_brightness, G::PictureBrightnessMin, G::PictureBrightnessMax, "%d",
+              "Raises or lowers the black level, like a TV's Brightness; white stays white. 0 is the game as "
+              "made. Use the game's own Brightness first. Seen when this menu closes, or at once with Pause game off.");
+    SliderRow("Contrast", s.picture_contrast, G::PictureContrastMin, G::PictureContrastMax, "%d%%",
+              "Spreads or narrows the tones around mid grey. 100% is the game as made. Seen when this menu "
+              "closes, or at once with Pause game off.");
+    PictureGammaRow(s.picture_gamma,
+                    "The display gamma the picture is shaped for: 2.20 is a PC monitor and the game as made, 2.40 "
+                    "the TVs the game was made for (darker mid tones). Seen when this menu closes, or at once "
+                    "with Pause game off.");
+}
+
+// Brightness 0, contrast 100% and gamma 2.20 again; greyed out while they already are.
+void PictureResetButton(SpartanSettings::Values& s) {
+    namespace G = SpartanGraphics;
+    const bool neutral = G::PictureNeutral(s.picture_brightness, s.picture_contrast, s.picture_gamma);
+    if (neutral) ImGui::BeginDisabled();
+    if (Button("Picture as made")) {
+        Store(s.picture_brightness, G::PictureBrightnessNeutral, true);
+        Store(s.picture_contrast, G::PictureContrastNeutral, true);
+        Store(s.picture_gamma, G::PictureGammaNeutral, true);
+    }
+    if (neutral) ImGui::EndDisabled();
+    Help("Brightness 0, contrast 100% and gamma 2.20: the picture exactly as the game draws it.");
+}
+
 const char* UpscalerLabel(int upscaler) {
     switch (upscaler) {
     case SpartanSettings::UpscalerFsr3: return "FSR 3.1";
@@ -602,6 +654,39 @@ void ImageTab() {
         ChoiceRow("Display mode", s.display_mode, G::DisplayModeNames.data(), nullptr, G::DisplayModeCount,
                   "Windowed, borderless window or exclusive fullscreen.");
         CheckRow("VSync", s.vsync, "Waits for the monitor: no tearing, a little more input delay.");
+        ImGui::EndTable();
+    }
+    Separator("Picture");
+    if (BeginRows("##picture")) {
+        PictureRows(s);
+        ImGui::EndTable();
+    }
+    PictureResetButton(s);
+    // HDR output's paper white and peak: greyed out unless the picture is being shown in HDR10. With
+    // Match Windows HDR settings the presenter put the display's values into the sliders at start;
+    // each slider is greyed out while it is on and Windows reported its value, and turning it off
+    // starts from them.
+    Separator("HDR");
+    const bool hdr = s.hdr_active;
+    if (!hdr) DisabledText("HDR output is off: turn on HDR in the launcher and in Windows, then restart.");
+    if (BeginRows("##hdr")) {
+        namespace G = SpartanGraphics;
+        ImGui::BeginDisabled(!hdr);
+        CheckRow("Match Windows HDR settings", s.hdr_auto,
+                 "HDR brightness follows Windows' SDR content brightness and HDR peak brightness the display's "
+                 "own peak, as Windows reports them; a value Windows does not report stays on its slider. "
+                 "Turned on, it applies on restart.");
+        ImGui::BeginDisabled(s.hdr_auto && s.hdr_paper_white_known);
+        SliderRow("HDR brightness", s.hdr_paper_white, G::HdrPaperWhiteMin, G::HdrPaperWhiteMax, "%d nits",
+                  "Where the game's white is shown, in nits: higher is brighter. 200 suits most rooms. "
+                  "Seen when this menu closes, or at once with Pause game off.");
+        ImGui::EndDisabled();
+        ImGui::BeginDisabled(s.hdr_auto && s.hdr_peak_known);
+        SliderRow("HDR peak brightness", s.hdr_peak, G::HdrPeakMin, G::HdrPeakMax, "%d nits",
+                  "Set it to your display's peak brightness, so the brightest parts keep their detail. "
+                  "Seen when this menu closes, or at once with Pause game off.");
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
         ImGui::EndTable();
     }
     const int iw = s.image_width, ih = s.image_height, ww = s.window_width, wh = s.window_height;
@@ -1392,28 +1477,219 @@ void ChoiceBox() {
     ImGui::End();
 }
 
-void LoadingScreen() {
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-                                   viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
-                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x * 0.4f, 0.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(0.0f);
-    ImGui::Begin("##loading", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
-                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
-    const u32 done = loading_done, total = loading_total;
-    ImGui::SetWindowFontScale(1.6f);
-    UiText(total ? "Loading shader cache..." : "Preparing graphics...");
-    ImGui::SetWindowFontScale(1.0f);
-    if (total) {
-        char count[64];
-        std::snprintf(count, sizeof(count), "%u / %u (%u%%)", done, total,
-                      u32(u64(done) * 100 / total));
-        ImGui::ProgressBar(float(done) / float(total), ImVec2(-1.0f, 0.0f), count);
+// The loading screen's art from the launcher folder beside bin/: the launcher's key art, already
+// darkened for text (backdrop),
+// the SP emblem and the SpartanPort wordmark. Render thread; loaded once, kept for the run.
+// shortcut: about 7 MB of textures stay after the screen closes; free them if memory gets tight.
+struct LoadingArt {
+    ImTextureData* backdrop = nullptr;
+    ImTextureData* emblem = nullptr;
+    ImTextureData* wordmark = nullptr;
+    bool tried = false;
+};
+LoadingArt loading_art;
+
+ImTextureData* LoadArt(const char* name) {
+    const char* base = SDL_GetBasePath();
+    const std::filesystem::path bin(base ? base : "");
+    // Packages and the AppImage: bin/../launcher. The source tree: out/gpu/../../launcher. The Arch
+    // package: /usr/lib/spartanport/../../share/spartanport/launcher.
+    for (const auto& dir : {bin / ".." / "launcher", bin / ".." / ".." / "launcher",
+                            bin / ".." / ".." / "share" / "spartanport" / "launcher"}) {
+        SpartanPng::Image image;
+        if (!SpartanPng::LoadRgba((dir / name).string().c_str(), image)) {
+            continue;
+        }
+        ImTextureData* tex = IM_NEW(ImTextureData)();
+        tex->Create(ImTextureFormat_RGBA32, image.width, image.height);
+        std::memcpy(tex->GetPixels(), image.rgba.data(), image.rgba.size());
+        ImGui::RegisterUserTexture(tex);
+        return tex;
     }
-    DisabledText("The first start after an update takes longer.");
-    ImGui::End();
+    std::printf("Overlay: loading screen art %s not found\n", name);
+    return nullptr;
+}
+
+struct Ember {
+    float x, y, vx, vy, life, radius;
+};
+std::vector<Ember> embers; // render thread
+u32 eta_stage = 0;         // the stage the time estimate follows
+u32 eta_done = 0;          // its count when the estimate started
+u32 eta_total = 0;         // its total
+double eta_start = 0.0;    // ImGui time then
+
+ImU32 Rgba(int r, int g, int b, float a = 1.0f) {
+    return IM_COL32(r, g, b, int(std::clamp(a, 0.0f, 1.0f) * 255.0f));
+}
+
+// A soft round glow, drawn as rings from the edge in.
+void Glow(ImDrawList* dl, ImVec2 c, float radius, int r, int g, int b, float alpha) {
+    constexpr int kRings = 40;
+    for (int i = kRings; i >= 1; --i) {
+        const float f = float(i) / kRings;
+        dl->AddCircleFilled(c, radius * f, Rgba(r, g, b, alpha * (1.0f - f) * (1.0f - f) * 0.3f), 64);
+    }
+}
+
+void Label(ImDrawList* dl, ImFont* font, float size, ImVec2 at, ImU32 col, const char* text, float align = 0.0f) {
+    if (align != 0.0f) {
+        at.x -= font->CalcTextSizeA(size, FLT_MAX, 0.0f, text).x * align;
+    }
+    dl->AddText(font, size, at, col, text);
+}
+
+// The shader preparation screen (proposal "Brasa"): the launcher's key art darkened, the SP emblem
+// with an ember glow, the wordmark, the step and why it runs, a thin gold line with an ember head
+// that throws sparks, the count and the time left, the steps, and how to skip.
+void LoadingScreen() {
+    if (!loading_art.tried) {
+        loading_art.tried = true;
+        loading_art.backdrop = LoadArt("loading-background.jpg");
+        loading_art.emblem = LoadArt("spartanport.png");
+        loading_art.wordmark = LoadArt("logo.png");
+    }
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    const float W = viewport->Size.x, H = viewport->Size.y, ox = viewport->Pos.x, oy = viewport->Pos.y;
+    const float k = H / 1080.0f;
+    const float t = float(ImGui::GetTime()), dt = std::min(ImGui::GetIO().DeltaTime, 0.05f);
+    const u32 done = loading_done, total = loading_total, stage = loading_stage;
+    const float frac = total ? std::clamp(float(done) / float(total), 0.0f, 1.0f) : 0.0f;
+
+    dl->AddRectFilled(ImVec2(ox, oy), ImVec2(ox + W, oy + H), Rgba(5, 4, 4));
+    if (ImTextureData* art = loading_art.backdrop) {
+        // Cover the screen with a slow zoom: only the visible part of the picture, by its UVs.
+        const float zoom = 1.04f + 0.03f * (0.5f + 0.5f * std::sin(t / 14.0f));
+        const float scale = std::max(W / art->Width, H / art->Height) * zoom;
+        const float uw = W / (art->Width * scale), uh = H / (art->Height * scale);
+        const ImVec2 uv0((1.0f - uw) * 0.5f, (1.0f - uh) * 0.5f);
+        // In 4 x 4 tiles: the preview's software renderer drops a textured quad this large.
+        constexpr int kTiles = 4;
+        for (int ty = 0; ty < kTiles; ++ty) {
+            for (int tx = 0; tx < kTiles; ++tx) {
+                const float fx0 = float(tx) / kTiles, fx1 = float(tx + 1) / kTiles;
+                const float fy0 = float(ty) / kTiles, fy1 = float(ty + 1) / kTiles;
+                dl->AddImage(art->GetTexRef(), ImVec2(ox + W * fx0, oy + H * fy0), ImVec2(ox + W * fx1, oy + H * fy1),
+                             ImVec2(uv0.x + uw * fx0, uv0.y + uh * fy0), ImVec2(uv0.x + uw * fx1, uv0.y + uh * fy1));
+            }
+        }
+    }
+
+    const bool cjk = SpartanUi::chinese || SpartanUi::loading_language != int(SpartanUi::LoadingLanguage::Menu);
+    ImFont* body = ImGui::GetFont();
+    ImFont* display = title_font && !cjk ? title_font : body;
+    const float L = ox + 140.0f * k, R = ox + W - 140.0f * k, y = oy + H - 210.0f * k;
+    const ImU32 text = ImGui::GetColorU32(Ink::Text), muted = ImGui::GetColorU32(Ink::Muted);
+
+    // Emblem with a slow ember glow behind it, the wordmark beside it.
+    const float eh = 150.0f * k, ey = y - 182.0f * k;
+    float ew = eh;
+    if (ImTextureData* e = loading_art.emblem) {
+        ew = eh * e->Width / e->Height;
+        Glow(dl, ImVec2(L + ew * 0.5f, ey + eh * 0.55f), eh * 0.95f, 200, 30, 37,
+             0.75f + 0.35f * std::sin(t / 0.9f));
+        dl->AddImage(e->GetTexRef(), ImVec2(L, ey), ImVec2(L + ew, ey + eh));
+    }
+    const float tx = L + ew + 28.0f * k;
+    if (ImTextureData* m = loading_art.wordmark) {
+        const float mh = 46.0f * k, mw = mh * m->Width / m->Height;
+        dl->AddImage(m->GetTexRef(), ImVec2(tx, ey + 6.0f * k), ImVec2(tx + mw, ey + 6.0f * k + mh));
+    }
+
+    using SpartanUi::LoadingTr;
+    const char* title = stage == LoadingShaders     ? LoadingTr("Preparing shaders")
+                        : stage == LoadingPipelines ? LoadingTr("Preparing pipelines")
+                        : stage == LoadingCache     ? LoadingTr("Reading the shader cache")
+                                                    : Tr("Preparing graphics...");
+    static constexpr const char* kReasons[] = {
+        "First start: preparing the graphics once", "New graphics driver: preparing the pipelines again",
+        "New shader list: preparing what changed", "Port update: preparing the graphics again",
+        "Reading the saved shaders from the disk"};
+    const char* reason = LoadingTr(kReasons[std::min<u32>(loading_reason, LoadingCacheOnly)]);
+    Label(dl, display, 40.0f * k, ImVec2(tx, y - 92.0f * k), text, title);
+    Label(dl, body, 20.0f * k, ImVec2(tx, y - 40.0f * k), muted, reason);
+
+    // Count and time left, from this stage's own pace.
+    // A new step can start before its first count arrives: a count that falls or a new total also
+    // restarts the estimate.
+    if (stage != eta_stage || total != eta_total || done < eta_done) {
+        eta_stage = stage;
+        eta_done = done;
+        eta_total = total;
+        eta_start = t;
+    }
+    if (total) {
+        const char* code = SpartanUi::loading_language == int(SpartanUi::LoadingLanguage::Menu)
+                               ? SpartanUi::Languages[SpartanUi::language].code.data()
+                               : std::getenv("SPARTAN_UI_LANGUAGE");
+        const std::string_view lang = code ? code : "en";
+        const std::string count =
+            SpartanUi::FormatCount(done, lang) + " / " + SpartanUi::FormatCount(total, lang);
+        Label(dl, body, 30.0f * k, ImVec2(R, y - 82.0f * k), text, count.c_str(), 1.0f);
+        const double spent = t - eta_start;
+        char left[160] = "";
+        if (done >= total) {
+            std::snprintf(left, sizeof(left), "%s", LoadingTr("Almost done"));
+        } else if (spent >= 2.0 && done > eta_done) {
+            const double secs = (total - done) * spent / double(done - eta_done);
+            if (secs < 3.0) {
+                std::snprintf(left, sizeof(left), "%s", LoadingTr("Almost done"));
+            } else if (secs < 60.0) {
+                std::snprintf(left, sizeof(left), LoadingTr("About %d s left"), int(std::ceil(secs)));
+            } else {
+                std::snprintf(left, sizeof(left), LoadingTr("About %d min left"), int(std::ceil(secs / 60.0)));
+            }
+        }
+        Label(dl, body, 20.0f * k, ImVec2(R, y - 40.0f * k), muted, left, 1.0f);
+    }
+
+    // The line: a dark track, the gold part so far, and the ember head with its sparks. Without a
+    // count the head sweeps back and forth, so the screen never looks stopped.
+    dl->AddRectFilled(ImVec2(L, y), ImVec2(R, y + 3.0f * k), Rgba(42, 32, 32));
+    const float hx = total ? L + (R - L) * frac : L + (R - L) * (0.5f + 0.5f * std::sin(t * 1.2f));
+    if (total) {
+        dl->AddRectFilledMultiColor(ImVec2(L, y - 0.5f * k), ImVec2(hx, y + 3.5f * k), Rgba(164, 22, 26),
+                                    Rgba(184, 134, 43), Rgba(184, 134, 43), Rgba(164, 22, 26));
+    }
+    Glow(dl, ImVec2(hx, y + 1.5f * k), 28.0f * k, 240, 190, 90, 0.9f + 0.3f * std::sin(t / 0.18f));
+    if (frac < 1.0f && (std::rand() & 1)) {
+        embers.push_back({hx + float(std::rand() % 9 - 4) * k, y, float(std::rand() % 41 - 20) * k,
+                          -(30.0f + float(std::rand() % 60)) * k, 1.0f,
+                          (1.2f + float(std::rand() % 20) / 10.0f) * k});
+    }
+    for (Ember& e : embers) {
+        e.life -= dt * 0.7f;
+        e.x += e.vx * dt;
+        e.y += e.vy * dt;
+        e.vx += float(std::rand() % 61 - 30) * k * dt;
+        const ImU32 col = e.life > 0.6f ? Rgba(224, 178, 90, e.life) : Rgba(200, 30, 37, e.life);
+        dl->AddCircleFilled(ImVec2(e.x, e.y), e.radius, col, 8);
+    }
+    std::erase_if(embers, [](const Ember& e) { return e.life <= 0.0f; });
+
+    // The steps planned, the one running in gold.
+    static constexpr std::pair<u32, const char*> kSteps[] = {
+        {LoadingShaders, "Shaders"}, {LoadingPipelines, "Pipelines"}, {LoadingCache, "Cache"}};
+    float sx = L;
+    const float sy = y + 46.0f * k, ss = 17.0f * k;
+    for (const auto& [bit, name] : kSteps) {
+        if (!(loading_steps & bit)) {
+            continue;
+        }
+        const bool now = stage == bit, past = stage > bit;
+        const ImU32 col = now ? Rgba(224, 178, 90) : past ? text : Rgba(76, 68, 64);
+        const ImVec2 dot(sx + 8.0f * k, sy + ss * 0.6f);
+        if (now || past) {
+            dl->AddCircleFilled(dot, 6.0f * k, col, 16);
+        } else {
+            dl->AddCircle(dot, 6.0f * k, col, 16, 1.5f * k);
+        }
+        const char* label = LoadingTr(name);
+        Label(dl, body, ss, ImVec2(sx + 22.0f * k, sy), col, label);
+        sx += 22.0f * k + body->CalcTextSizeA(ss, FLT_MAX, 0.0f, label).x + 30.0f * k;
+    }
+    Label(dl, body, 18.0f * k, ImVec2(R, sy), muted, LoadingTr("Esc or Circle: start playing now"), 1.0f);
 }
 
 void FpsCounter() {
@@ -2519,6 +2795,56 @@ void StepEngineFps(int direction) {
 }
 
 // The ImGui context's options, style, fonts and language (Init; also tools/overlay_preview.cpp).
+// The installed font for the preparation screen in Japanese or Korean, merged into the menu font like
+// Chinese's. No font is bundled. False when none is installed: the screen stays in English.
+bool ConfigureLoadingFont(ImFontAtlas* atlas, SpartanUi::LoadingLanguage language) {
+    const bool japanese = language == SpartanUi::LoadingLanguage::Japanese;
+    std::vector<SpartanUi::ChineseFontFile> candidates;
+#ifdef _WIN32
+    wchar_t directory[MAX_PATH]{};
+    const UINT size = GetWindowsDirectoryW(directory, MAX_PATH);
+    if (size && size < MAX_PATH) {
+        const auto fonts = std::filesystem::path(directory) / L"Fonts";
+        for (const wchar_t* name : japanese ? std::initializer_list<const wchar_t*>{L"YuGothM.ttc", L"meiryo.ttc",
+                                                                                     L"msgothic.ttc"}
+                                            : std::initializer_list<const wchar_t*>{L"malgun.ttf", L"gulim.ttc"}) {
+            candidates.push_back({fonts / name, 0});
+        }
+    }
+#else
+    // Noto's CJK collection orders Japanese, Korean, Simplified Chinese, Traditional, HK.
+    for (const char* name : {"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                             "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+                             "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc"}) {
+        candidates.push_back({name, japanese ? 0 : 1});
+    }
+    candidates.push_back({japanese ? "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf"
+                                   : "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+                          0});
+#endif
+    for (const auto& file : candidates) {
+        if (!SpartanUi::UsableFont(file.path)) {
+            continue;
+        }
+        static ImVector<ImWchar> ranges; // alive until the atlas is built
+        ImFontGlyphRangesBuilder builder;
+        builder.AddRanges(atlas->GetGlyphRangesDefault());
+        for (const auto& [english, translated] :
+             japanese ? std::span(SpartanUi::LoadingJapanese) : std::span(SpartanUi::LoadingKorean)) {
+            builder.AddText(translated);
+        }
+        builder.BuildRanges(&ranges);
+        ImFontConfig config;
+        config.MergeMode = true;
+        config.FontNo = file.index;
+        const auto utf8 = file.path.u8string();
+        if (atlas->AddFontFromFileTTF(reinterpret_cast<const char*>(utf8.c_str()), 18.0f, &config, ranges.Data)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void ConfigureContext() {
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr; // window positions are not kept
@@ -2594,6 +2920,16 @@ void ConfigureContext() {
         std::printf("Overlay: no usable system CJK font; keeping English menu text\n");
     }
     SpartanUi::SetLanguage(wanted);
+    // The preparation screen follows the launcher language, also where the menu has no table for it.
+    auto loading_language =
+        chosen >= 0 ? SpartanUi::LoadingLanguage::Menu : SpartanUi::LoadingLanguageFor(ui_language ? ui_language : "");
+    if ((loading_language == SpartanUi::LoadingLanguage::Japanese ||
+         loading_language == SpartanUi::LoadingLanguage::Korean) &&
+        !ConfigureLoadingFont(io.Fonts, loading_language)) {
+        std::printf("Overlay: no usable system CJK font; keeping the loading screen in English\n");
+        loading_language = SpartanUi::LoadingLanguage::Menu;
+    }
+    SpartanUi::loading_language = int(loading_language);
     if (!SpartanUi::chinese) {
         ImFontConfig title_config;
         title_config.FontDataOwnedByAtlas = false;
@@ -2616,7 +2952,7 @@ void StartNotifications() {
     ApplyLanguage(SpartanUi::language);
 }
 
-void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
+void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count, float hdr10_white_nits) {
     std::scoped_lock lock{imgui_mutex};
     if (initialized) {
         return;
@@ -2654,6 +2990,21 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         .colorAttachmentCount = 1,
         .pColorAttachmentFormats = &color_format,
     };
+    if (hdr10_white_nits > 0.0f) {
+        // ImGui draws SDR values; on the HDR10 swapchain they are encoded to PQ with white at the
+        // paper white in use now (host_shaders/overlay_hdr.frag). The pipeline is built once, so a
+        // later move of the HDR brightness slider leaves the menu at this value until a restart. The
+        // backend keeps the pointer: the code is static (Init runs once).
+        static std::vector<u32> code(std::begin(OVERLAY_HDR_FRAG), std::end(OVERLAY_HDR_FRAG));
+        if (!Vulkan::SetSpecConstantDefault(code, 0, hdr10_white_nits)) {
+            std::printf("Overlay: menu white not set, the menu stays at 200 nits\n");
+        }
+        info.CustomShaderFragCreateInfo = {
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .codeSize = code.size() * sizeof(u32),
+            .pCode = code.data(),
+        };
+    }
     if (!ImGui_ImplVulkan_Init(&info)) {
         std::printf("Overlay: ImGui Vulkan backend init failed\n");
         ImGui::DestroyContext();
@@ -2966,6 +3317,18 @@ void SetLoading(bool active, u32 done, u32 total) {
     loading_done = done;
     loading_total = total;
     loading = active;
+}
+
+void AddLoadingSteps(u32 steps) {
+    loading_steps |= steps;
+}
+
+void SetLoadingReason(u32 reason) {
+    loading_reason = reason;
+}
+
+void SetLoadingStage(u32 step) {
+    loading_stage = step;
 }
 
 bool Visible() {
