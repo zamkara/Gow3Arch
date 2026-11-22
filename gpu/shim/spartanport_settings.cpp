@@ -522,10 +522,10 @@ int RenderPreset() {
 bool ResolutionNeedsRestart() {
     const auto& v = Get();
     // TAA needs the live path (native guest targets): run.sh selects it on restart.
-    return FixedRenderSession() &&
+    return (FixedRenderSession() &&
         (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
          (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
-         NeedsLivePath(v.upscaler) != NeedsLivePath(v.startup_upscaler)) ||
+         NeedsLivePath(v.upscaler) != NeedsLivePath(v.startup_upscaler))) ||
         NeedsXessRestart(v.upscaler, v.startup_upscaler);
 }
 
