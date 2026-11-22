@@ -141,7 +141,7 @@ assertions uncovered are listed under [Partly covered](#partly-covered).
 | `tests/test_launcher_controls.py::GpuChoiceTest::test_parse_gpu_list` | `src/core/gpu.rs::tests::parse_gpu_list_reads_rows` | ported |
 | `tests/test_launcher_controls.py::GpuChoiceTest::test_list_gpus_failures_leave_only_automatic` | `src/core/gpu.rs::tests::a_missing_tool_lists_nothing` | replaced by `src/core/gpu.rs::tests::a_missing_tool_lists_nothing` |
 | `tests/test_launcher_controls.py::GpuChoiceTest::test_gpu_choice_reaches_the_game` | `src/core/env.rs::tests::inherited_gpu_id_and_monitor_are_dropped_when_not_digits` | replaced by `src/core/env.rs::tests::inherited_gpu_id_and_monitor_are_dropped_when_not_digits` |
-| `tests/test_launcher_controls.py::ReleaseVersionTest::test_port_release_is_newer_than_the_inherited_tags` | `tests/core_boundary.rs::version_is_the_crates`, `src/core/update.rs::tests::versions_are_their_digit_runs` | replaced by `tests/core_boundary.rs::version_is_the_crates`, `src/core/update.rs::tests::versions_are_their_digit_runs` |
+| `tests/test_launcher_controls.py::ReleaseVersionTest::test_port_release_is_newer_than_the_inherited_tags` | `src/core/update.rs::tests::versions_are_their_digit_runs` | ported |
 | `tests/test_launcher_controls.py::ReleaseVersionTest::test_first_start_is_in_english` | `tests/startup.rs::first_start_is_in_english_when_the_system_language_is_unknown` | ported |
 | `tests/test_launcher_controls.py::PadStyleTest::test_nintendo_names_follow_the_button_positions` | `tests/ui_pages.rs::nintendo_names_follow_the_button_positions` | ported |
 | `tests/test_launcher_controls.py::PadStyleTest::test_device_is_its_own_choice` | `tests/ui_pages.rs::device_is_its_own_choice` | ported |
@@ -325,8 +325,8 @@ assertions uncovered are listed under [Partly covered](#partly-covered).
 | `tests/test_launcher_polish_language.py::PolishLanguageTest::test_system_service_contract_maps_parameter_1_to_spartanport_language` | — | dropped: no Rust counterpart — the C runtime answers system parameter 1 with SPARTAN_LANGUAGE (a runtime source check, not launcher code) |
 | `tests/test_launcher_portable_settings.py::PortableSettingsPathsTest::test_config_dir_is_data_dir` | `src/core/paths.rs::tests::data_dir_defaults_to_the_executables_folder` | replaced by `src/core/paths.rs::tests::data_dir_defaults_to_the_executables_folder` |
 | `tests/test_launcher_portable_settings.py::PortableSettingsPathsTest::test_user_files_includes_settings_and_icon` | `src/core/update.rs::tests::user_files_include_settings_and_icon` | ported |
-| `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_copies_legacy_config_and_icon_when_portable_missing` | `src/core/settings.rs::tests::portable_migration_copies_only_settings` | replaced by `src/core/settings.rs::tests::portable_migration_copies_only_settings` |
-| `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_does_not_overwrite_existing_portable_config` | `src/core/settings.rs::tests::portable_migration_copies_only_settings` | replaced by `src/core/settings.rs::tests::portable_migration_copies_only_settings` |
+| `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_copies_legacy_config_and_icon_when_portable_missing` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_does_not_overwrite_existing_portable_config` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
 | `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_missing_legacy_config_is_a_noop` | — | dropped: no Rust counterpart — without a legacy settings.json the migration creates nothing |
 | `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_load_app_settings_migrates_and_merges_defaults` | — | dropped: no Rust counterpart — loading the settings first copies the legacy settings.json, then merges the defaults over it |
 | `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_packaging_scripts_preserve_portable_files` | — | dropped: no Rust counterpart — the Windows package and its smoke test keep settings.json and game_icon.ico (packaging is a later sub-project) |
@@ -564,6 +564,9 @@ the Python test:
 | `tests/test_trophies.py::TrophyEnvironmentAndPersistence::test_write_trophy_texts_and_launcher_display_consistency` | — | dropped: no Rust counterpart — write trophy texts and launcher display consistency; covered by the Python native launcher suite |
 
 ## Gaps
+
+- `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_copies_legacy_config_and_icon_when_portable_missing` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_launcher_portable_settings.py::PortableSettingsMigrationTest::test_does_not_overwrite_existing_portable_config` — the mapped Rust test was removed during the launcher cutover
 
 The 98 rows marked `dropped: no Rust counterpart`: Python behaviour that no Rust test covers.
 

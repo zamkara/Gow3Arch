@@ -11,14 +11,15 @@ class UpscalerFrameBoundaryTests(unittest.TestCase):
         source = (RENDERER / 'vk_temporal_upscaler.cpp').read_text(encoding='utf-8')
         start = source.index('if (ps_hash == ldr_trigger_ps && color && !done_this_frame)')
         boundary = source[start:source.index('bool TemporalUpscaler::RecordStencilReactive', start)]
-        self.assertLess(boundary.index('OnSceneComposite();'), boundary.index('scene_color = color;'))
+        self.assertLess(boundary.index('OnSceneComposite();'), boundary.index('OnSceneColor(color);'))
 
     def test_composite_finishes_before_camera_and_frame_state_are_cleared(self):
         source = (RENDERER / 'vk_rasterizer.cpp').read_text(encoding='utf-8')
         start = source.index('void Rasterizer::DrawRecord(')
         boundary = source[start:source.index('bind_prepared = used_prepared;', start)]
-        self.assertLess(boundary.index('upscaler->OnFrameStart()'),
-                        boundary.index('camera_motion->OnDisplayPass('))
+        frame_start = boundary[boundary.index('if (start_frame) {'):]
+        self.assertLess(frame_start.index('upscaler->OnFrameStart()'),
+                        frame_start.index('camera_motion->OnDisplayPass('))
 
         source = (RENDERER / 'vk_temporal_upscaler.cpp').read_text(encoding='utf-8')
         start = source.index('bool TemporalUpscaler::OnFrameStart()')

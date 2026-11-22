@@ -139,7 +139,7 @@ The rows against `src/core/legacy.rs`, `src/core/save_backup.rs` and the discove
 | `tests/test_run_isa.py::RunIsaTests::test_rewrite_forced` | `tests/runner.rs::isa_rewrite_1_forces_it` | replaced by `tests/runner.rs::isa_rewrite_1_forces_it` |
 | `tests/test_run_isa.py::RunIsaTests::test_rewrite_disabled` | `tests/runner.rs::isa_rewrite_0_skips_it` | replaced by `tests/runner.rs::isa_rewrite_0_skips_it` |
 | `tests/test_patches.py::ExternalPatchTests::test_selection_and_unsupported_lines` | `src/core/patches.rs::compile_tests::selection_and_unsupported_lines` | ported |
-| `tests/test_patches.py::ExternalPatchTests::test_an_older_builds_patch_file_left_by_an_update_is_not_external` | `src/core/patches.rs::compile_tests::an_older_builds_patch_file_left_by_an_update_is_not_external` | ported |
+| `tests/test_patches.py::ExternalPatchTests::test_an_older_builds_patch_file_left_by_an_update_is_not_external` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
 | `tests/test_patches.py::ExternalPatchTests::test_built_in_file_is_not_external` | `src/core/patches.rs::compile_tests::built_in_file_is_not_external` | ported |
 | `tests/test_patches.py::GameProfileTests::test_profiles_by_title_id` | `src/core/patches.rs::compile_tests::profiles_by_title_id` | ported |
 | `tests/test_patches.py::GameProfileTests::test_unavailable_frame_rate_patch_falls_back_to_the_highest_lower_one` | `src/core/graphics_options.rs::tests::unavailable_frame_rate_patch_falls_back_to_the_highest_lower_one` | ported |
@@ -357,38 +357,38 @@ The rows against `src/core/legacy.rs`, `src/core/save_backup.rs` and the discove
 | `tests/test_native_cheats.py::NativeCheats::test_custom_pages_preserve_the_native_footer` | `tests/dump.rs::real_menu_custom_pages_preserve_the_native_footer` | ported |
 | `tests/test_native_cheats.py::NativeCheats::test_multiplier_bars_are_separate_from_numbers_and_original_sliders` | `tests/dump.rs::real_menu_multiplier_bars_are_separate_from_numbers_and_original_sliders` | ported |
 | `tests/test_native_cheats.py::NativeCheats::test_every_state_reference_and_relative_call_stays_in_the_script` | `tests/dump.rs::real_menu_every_state_reference_and_relative_call_stays_in_the_script` | ported |
-| `tests/test_legacy.py::LegacyTest::test_game_settings_file_is_copied_and_kept` | `src/core/legacy.rs::tests::game_settings_file_is_copied_and_kept` | ported |
-| `tests/test_legacy.py::LegacyTest::test_game_settings_file_is_not_overwritten` | `src/core/legacy.rs::tests::game_settings_file_is_not_overwritten` | ported |
-| `tests/test_legacy.py::LegacyTest::test_linux_data_folder_with_saves_is_copied` | `src/core/legacy.rs::tests::linux_data_folder_with_saves_is_copied` | ported |
-| `tests/test_legacy.py::LegacyTest::test_linux_data_copy_leaves_caches_and_run_folders` | `src/core/legacy.rs::tests::linux_data_copy_leaves_caches_and_run_folders` | ported |
-| `tests/test_legacy.py::LegacyTest::test_linux_data_copy_keeps_newer_files` | `src/core/legacy.rs::tests::linux_data_copy_keeps_newer_files` | ported |
-| `tests/test_legacy.py::LegacyTest::test_runs_once` | `src/core/legacy.rs::tests::runs_once` | ported |
-| `tests/test_legacy.py::LegacyTest::test_nothing_to_move_is_quiet` | `src/core/legacy.rs::tests::nothing_to_move_is_quiet` | ported |
-| `tests/test_legacy.py::LegacyTest::test_old_menu_entry_of_ours_is_removed_and_a_hand_made_one_kept` | `src/core/legacy.rs::tests::old_menu_entry_of_ours_is_removed_and_a_hand_made_one_kept` | ported |
-| `tests/test_legacy.py::LegacyTest::test_environment_is_forwarded_without_overriding` | `src/core/legacy.rs::tests::environment_is_forwarded_without_overriding` | ported |
-| `tests/test_legacy.py::LegacyTest::test_custom_data_folder_wins_over_the_appimage_default` | `src/core/legacy.rs::tests::custom_data_folder_wins_over_the_appimage_default` | ported |
-| `tests/test_legacy.py::LegacyTest::test_leftover_binaries_go_only_when_the_new_ones_exist` | `src/core/legacy.rs::tests::leftover_binaries_go_only_when_the_new_ones_exist` | ported |
-| `tests/test_legacy.py::LegacyTest::test_old_executable_copies_stay` | `src/core/legacy.rs::tests::old_executable_copies_stay` | ported |
-| `tests/test_legacy.py::UpgradeFromFormerNameTest::test_the_old_settings_folder_name_is_the_former_one` | `src/core/paths.rs::tests::legacy_config_file_is_appdata_gow3_launcher_on_windows`, `src/core/paths.rs::tests::legacy_config_file_is_xdg_config_gow3_launcher_on_unix` | replaced by `src/core/paths.rs::tests::legacy_config_file_is_appdata_gow3_launcher_on_windows`, `src/core/paths.rs::tests::legacy_config_file_is_xdg_config_gow3_launcher_on_unix` |
-| `tests/test_legacy.py::UpgradeFromFormerNameTest::test_windows_settings_move_and_saves_stay` | `src/core/settings.rs::tests::portable_migration_copies_only_settings`, `src/core/legacy.rs::tests::game_settings_file_is_copied_and_kept` | replaced by `src/core/settings.rs::tests::portable_migration_copies_only_settings`, `src/core/legacy.rs::tests::game_settings_file_is_copied_and_kept` |
-| `tests/test_legacy.py::UpgradeFromFormerNameTest::test_linux_appimage_settings_and_saves_are_copied` | `src/core/legacy.rs::tests::linux_data_folder_with_saves_is_copied`, `src/core/settings.rs::tests::portable_migration_copies_only_settings`, `src/core/legacy.rs::tests::game_settings_file_is_copied_and_kept` | replaced by `src/core/legacy.rs::tests::linux_data_folder_with_saves_is_copied`, `src/core/settings.rs::tests::portable_migration_copies_only_settings`, `src/core/legacy.rs::tests::game_settings_file_is_copied_and_kept` |
+| `tests/test_legacy.py::LegacyTest::test_game_settings_file_is_copied_and_kept` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_game_settings_file_is_not_overwritten` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_linux_data_folder_with_saves_is_copied` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_linux_data_copy_leaves_caches_and_run_folders` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_linux_data_copy_keeps_newer_files` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_runs_once` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_nothing_to_move_is_quiet` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_old_menu_entry_of_ours_is_removed_and_a_hand_made_one_kept` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_environment_is_forwarded_without_overriding` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_custom_data_folder_wins_over_the_appimage_default` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_leftover_binaries_go_only_when_the_new_ones_exist` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::LegacyTest::test_old_executable_copies_stay` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::UpgradeFromFormerNameTest::test_the_old_settings_folder_name_is_the_former_one` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::UpgradeFromFormerNameTest::test_windows_settings_move_and_saves_stay` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::UpgradeFromFormerNameTest::test_linux_appimage_settings_and_saves_are_copied` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
 | `tests/test_legacy.py::UpgradeFromFormerNameTest::test_settings_already_in_the_old_data_folder_win` | — | dropped: no Rust counterpart — a settings.json already in the old data folder (a build between the release and the rename) is read instead of the older one in the legacy config folder |
 | `tests/test_legacy.py::UpgradeFromFormerNameTest::test_start_moves_before_reading_settings` | — | dropped: no Rust counterpart — the start moves the legacy files before it reads the settings (no test pins the order in startup.rs) |
-| `tests/test_legacy.py::LauncherStartTest::test_the_update_installer_does_not_migrate` | `tests/startup.rs::the_update_installer_does_not_migrate`, `tests/startup.rs::arguments_route_to_their_roles` | replaced by `tests/startup.rs::the_update_installer_does_not_migrate`, `tests/startup.rs::arguments_route_to_their_roles` |
-| `tests/test_legacy.py::CrossPlatformShortcutMarkerTest::test_shortcut_migration_skips_when_marker_exists` | `src/core/legacy.rs::tests::shortcut_migration_skips_when_marker_exists` | ported |
-| `tests/test_legacy.py::CrossPlatformShortcutMarkerTest::test_shortcut_migration_returns_false_on_non_windows` | `src/core/legacy.rs::tests::shortcut_migration_returns_false_on_non_windows` | ported |
-| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_user_created_shortcut_with_custom_name` | `src/core/legacy.rs::tests::windows_shortcuts::user_created_shortcut_with_custom_name` | ported |
+| `tests/test_legacy.py::LauncherStartTest::test_the_update_installer_does_not_migrate` | `tests/startup.rs::arguments_route_to_their_roles` | ported |
+| `tests/test_legacy.py::CrossPlatformShortcutMarkerTest::test_shortcut_migration_skips_when_marker_exists` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::CrossPlatformShortcutMarkerTest::test_shortcut_migration_returns_false_on_non_windows` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_user_created_shortcut_with_custom_name` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
 | `tests/test_legacy.py::WindowsDesktopShortcutTest::test_shortcut_manually_renamed_to_legacy_title` | — | dropped: no Rust counterpart — a shortcut with the old title that points to SpartanPort.exe is kept and no SpartanPort.lnk is made (needs PowerShell) |
 | `tests/test_legacy.py::WindowsDesktopShortcutTest::test_user_shortcut_targeting_play_legacy_executable` | — | dropped: no Rust counterpart — a shortcut with the old title that points to the Play executable is kept, issue 824 (needs PowerShell) |
-| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_shortcut_with_custom_arguments_is_preserved` | `src/core/legacy.rs::tests::windows_shortcuts::shortcut_with_custom_arguments_is_preserved` | ported |
+| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_shortcut_with_custom_arguments_is_preserved` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
 | `tests/test_legacy.py::WindowsDesktopShortcutTest::test_existing_spartanport_shortcut_is_preserved` | — | dropped: no Rust counterpart — an existing SpartanPort.lnk is kept and the old shortcut stays (needs PowerShell) |
-| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_repeated_launcher_starts_do_not_retrigger_migration` | `src/core/legacy.rs::tests::windows_shortcuts::first_launch_after_upgrading_from_legacy_name` | replaced by `src/core/legacy.rs::tests::windows_shortcuts::first_launch_after_upgrading_from_legacy_name` |
-| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_first_launch_after_upgrading_from_legacy_name` | `src/core/legacy.rs::tests::windows_shortcuts::first_launch_after_upgrading_from_legacy_name` | ported |
-| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_ambiguous_ownership_preserves_existing_shortcut` | `src/core/legacy.rs::tests::windows_shortcuts::first_launch_after_upgrading_from_legacy_name` | replaced by `src/core/legacy.rs::tests::windows_shortcuts::first_launch_after_upgrading_from_legacy_name` |
+| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_repeated_launcher_starts_do_not_retrigger_migration` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_first_launch_after_upgrading_from_legacy_name` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
+| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_ambiguous_ownership_preserves_existing_shortcut` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
 | `tests/test_legacy.py::WindowsDesktopShortcutTest::test_failed_shortcut_creation_preserves_old_shortcut_and_does_not_write_marker` | — | dropped: no Rust counterpart — a failed PowerShell save keeps the old shortcut and writes no marker (the Python mocks subprocess.run; the Rust has no seam) |
 | `tests/test_legacy.py::WindowsDesktopShortcutTest::test_powershell_error_does_not_write_marker_and_allows_recovery` | — | dropped: no Rust counterpart — a PowerShell crash writes no marker and the next start recovers (the Python mocks subprocess.run; the Rust has no seam) |
 | `tests/test_legacy.py::WindowsDesktopShortcutTest::test_shortcut_targeting_unrelated_executable` | — | dropped: no Rust counterpart — a shortcut with the old title that points to an unrelated executable is kept (needs PowerShell) |
-| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_missing_shortcuts_and_missing_targets` | `src/core/legacy.rs::tests::windows_shortcuts::missing_shortcuts_and_missing_targets` | ported |
+| `tests/test_legacy.py::WindowsDesktopShortcutTest::test_missing_shortcuts_and_missing_targets` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
 | `tests/test_legacy.py::WindowsDesktopShortcutTest::test_windows_paths_containing_spaces` | — | dropped: no Rust counterpart — the shortcut migration works for a port folder and a desktop folder whose paths contain spaces (needs PowerShell) |
 | `tests/test_legacy.py::WindowsDesktopShortcutTest::test_launcher_move_from_legacy_name_integration` | — | dropped: no Rust counterpart — the launcher start runs the shortcut migration, keeps a custom Play shortcut and writes the marker (needs PowerShell) |
 | `tests/test_discord_presence.py::Framing::test_pack_has_opcode_length_and_utf8_body` | `src/runner/discord.rs::tests::pack_has_opcode_length_and_utf8_body` | ported |
@@ -479,6 +479,31 @@ the Python test:
 - `tests/test_discord_presence.py::LauncherSwitch::test_checked_enables_it`: an explicit true is not set apart from the default, which is true.
 
 ## Gaps
+
+- `tests/test_patches.py::ExternalPatchTests::test_an_older_builds_patch_file_left_by_an_update_is_not_external` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_game_settings_file_is_copied_and_kept` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_game_settings_file_is_not_overwritten` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_linux_data_folder_with_saves_is_copied` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_linux_data_copy_leaves_caches_and_run_folders` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_linux_data_copy_keeps_newer_files` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_runs_once` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_nothing_to_move_is_quiet` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_old_menu_entry_of_ours_is_removed_and_a_hand_made_one_kept` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_environment_is_forwarded_without_overriding` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_custom_data_folder_wins_over_the_appimage_default` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_leftover_binaries_go_only_when_the_new_ones_exist` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::LegacyTest::test_old_executable_copies_stay` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::UpgradeFromFormerNameTest::test_the_old_settings_folder_name_is_the_former_one` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::UpgradeFromFormerNameTest::test_windows_settings_move_and_saves_stay` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::UpgradeFromFormerNameTest::test_linux_appimage_settings_and_saves_are_copied` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::CrossPlatformShortcutMarkerTest::test_shortcut_migration_skips_when_marker_exists` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::CrossPlatformShortcutMarkerTest::test_shortcut_migration_returns_false_on_non_windows` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::WindowsDesktopShortcutTest::test_user_created_shortcut_with_custom_name` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::WindowsDesktopShortcutTest::test_shortcut_with_custom_arguments_is_preserved` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::WindowsDesktopShortcutTest::test_repeated_launcher_starts_do_not_retrigger_migration` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::WindowsDesktopShortcutTest::test_first_launch_after_upgrading_from_legacy_name` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::WindowsDesktopShortcutTest::test_ambiguous_ownership_preserves_existing_shortcut` — the mapped Rust test was removed during the launcher cutover
+- `tests/test_legacy.py::WindowsDesktopShortcutTest::test_missing_shortcuts_and_missing_targets` — the mapped Rust test was removed during the launcher cutover
 
 The 12 rows marked `dropped: no Rust counterpart`: Python behaviour that no Rust test covers.
 

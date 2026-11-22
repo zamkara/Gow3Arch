@@ -16,7 +16,7 @@ class AspectFilterTest(unittest.TestCase):
             aspect.set('16:10')
             self.assertEqual(resolution.get(), '1920x1200')
             self.assertEqual([v for v, _t in app.aspect_resolution_options()],
-                             ['1280x800', '1440x900', '1920x1200', '2560x1600'])
+                             ['1280x800', '1440x900', '1920x1200', '2560x1600', '2880x1800'])
             resolution.set('3440x1440')
             self.assertEqual(aspect.get(), '21:9')
             self.assertIn('4:3', [v for v, _t in app.aspect_options()])

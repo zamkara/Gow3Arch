@@ -85,7 +85,7 @@ tests (the `tests` segment is the module).
 | `tests/test_steam_shortcut.py::AddToSteamTests::test_every_account_gets_the_shortcut_and_the_five_pictures` | `src/core/steam.rs::tests::every_account_gets_the_shortcut_and_the_five_pictures` | ported |
 | `tests/test_steam_shortcut.py::AddToSteamTests::test_other_shortcuts_stay_and_a_backup_is_made` | `src/core/steam.rs::tests::other_shortcuts_stay_and_a_backup_is_made` | ported |
 | `tests/test_steam_shortcut.py::AddToSteamTests::test_adding_again_updates_the_same_shortcut` | `src/core/steam.rs::tests::adding_again_updates_the_same_shortcut` | ported |
-| `tests/test_steam_shortcut.py::AddToSteamTests::test_a_shortcut_from_before_the_rename_is_updated_not_doubled` | `src/core/steam.rs::tests::a_shortcut_from_before_the_rename_is_updated_not_doubled` | ported |
+| `tests/test_steam_shortcut.py::AddToSteamTests::test_a_shortcut_from_before_the_rename_is_updated_not_doubled` | — | dropped: no Rust counterpart — the named Rust test was removed during the launcher cutover |
 | `tests/test_steam_shortcut.py::AddToSteamTests::test_steam_open_and_steam_missing_are_refused` | `src/core/steam.rs::tests::steam_open_and_steam_missing_are_refused` | ported |
 | `tests/test_steam_shortcut.py::AddToSteamTests::test_a_game_folder_without_the_background_is_refused` | `src/core/steam.rs::tests::a_game_folder_without_the_background_is_refused` | ported |
 | `tests/test_xvag_voice_swap.py::SwapVoiceTests::test_only_the_frames_change` | `src/core/voice_swap.rs::tests::only_the_frames_change` | ported |
@@ -103,5 +103,7 @@ tests (the `tests` segment is the module).
 | `tests/test_xvag_voice_swap.py::RunTests::test_cli_reports_and_returns_zero` | `src/core/voice_swap.rs::tests::cli_reports_and_returns_zero` | ported |
 
 ## Gaps
+
+- `tests/test_steam_shortcut.py::AddToSteamTests::test_a_shortcut_from_before_the_rename_is_updated_not_doubled` — the mapped Rust test was removed during the launcher cutover
 
 None: the 0 rows marked `dropped: no Rust counterpart`.

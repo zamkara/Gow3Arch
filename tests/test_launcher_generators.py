@@ -9,7 +9,7 @@ class LauncherGeneratorOutput(unittest.TestCase):
     def test_i18n_json_has_every_language_and_the_russian_pairs(self):
         data = json.loads((ROOT / 'launcher-rust/assets/i18n.json').read_text(encoding='utf-8'))
         self.assertEqual(sorted(data['translations']),
-                         ['ar', 'de', 'es', 'fr', 'id', 'it', 'ja', 'ko', 'pl', 'pt', 'tr', 'zh'])
+                         ['ar', 'cs', 'de', 'es', 'fr', 'id', 'it', 'ja', 'ko', 'pl', 'pt', 'tr', 'zh'])
         for language, texts in data['translations'].items():
             self.assertEqual(len(texts), len(data['keys']), language)
         self.assertEqual(data['ru']['Graphics'], 'Графика')
